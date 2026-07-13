@@ -72,12 +72,19 @@ cmake_options_qtbase_per_platform:
     - "-DFEATURE_xcb=ON"
     - "-DINPUT_xcb=yes"
     - "-DINPUT_bundled_xcb_xinput=yes"
-    - "-DFEATURE_fontconfig=ON"
+    # NOTE: FEATURE_fontconfig requires INPUT_freetype=system (fontconfig
+    # links against system libfreetype). We use bundled freetype for a fully
+    # self-contained static build, so fontconfig is left to auto-detect OFF.
+    # Qt falls back to scanning standard font dirs (/usr/share/fonts, etc).
     - "-DFEATURE_reduce_exports=ON"  # GCC/Clang only (NOT MSVC)
   macos:
     - "-DINPUT_freetype=qt"
     - "-DFEATURE_framework=OFF"
     - "-DFEATURE_reduce_exports=ON"  # GCC/Clang only (NOT MSVC)
+    # Xcode 26 Clang treats implicit function declarations as errors (C99
+    # standard enforcement). Qt 6.10.2 qyieldcpu.h uses __yield() without
+    # including <arm_acle.h>. Downgrade this specific error back to a warning.
+    - "-DCMAKE_CXX_FLAGS=-Wno-error=implicit-function-declaration"
 
 # ── Build optimization ─────────────────────────────────────────────────────────
 optimization:
