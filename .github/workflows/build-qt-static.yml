@@ -115,7 +115,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.workspace }}/openssl-static
-          key: openssl-static-3.5.0-v2-${{ matrix.platform }}
+          key: openssl-static-3.5.0-v3-${{ matrix.platform }}
 
       - name: Build static OpenSSL (Linux/macOS)
         if: matrix.platform != 'windows' && steps.cache-openssl.outputs.cache-hit != 'true'
@@ -135,10 +135,12 @@ jobs:
             "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
           tar xzf openssl.tar.gz
           cd "openssl-${OPENSSL_VERSION}"
+          # --openssldir inside prefix so install_ssldirs does not touch /etc/ssl.
+          # install_sw = libs + headers; skip install_ssldirs (cert dirs not needed).
           ./Configure "${OPENSSL_ARCH}" no-shared no-tests -fPIC \
-            --prefix="${OPENSSL_PREFIX}" --openssldir=/etc/ssl --libdir=lib
+            --prefix="${OPENSSL_PREFIX}" --openssldir="${OPENSSL_PREFIX}/ssl" --libdir=lib
           make -j"$(nproc)"
-          make install_sw install_ssldirs
+          make install_sw
 
       - name: Install NASM (Windows)
         if: matrix.platform == 'windows' && steps.cache-openssl.outputs.cache-hit != 'true'
@@ -155,16 +157,45 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz" -OutFile "openssl.tar.gz"
           tar xzf openssl.tar.gz
           Set-Location "openssl-$OPENSSL_VERSION"
+
           # Find NASM (installed via choco)
           $nasmPath = (Get-Command nasm -ErrorAction SilentlyContinue).Source
           if (-not $nasmPath) { $nasmPath = "C:\Program Files\NASM\nasm.exe" }
           Write-Host "NASM: $nasmPath"
-          # Set up MSVC environment
+          $nasmDir = Split-Path $nasmPath -Parent
+
+          # Source vcvars64.bat into PowerShell so cl.exe/nmake.exe are in PATH.
+          # We must NOT use `cmd /c "vcvars && set PATH=%PATH% && ..."` because
+          # cmd.exe expands %PATH% at parse time, before vcvars64.bat runs,
+          # which discards the MSVC tools directory and breaks nmake.
           $vsRoot = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
           $vcvars = Join-Path $vsRoot "VC\Auxiliary\Build\vcvars64.bat"
-          $nasmDir = Split-Path $nasmPath -Parent
+          $envOutput = & cmd /c "`"$vcvars`" && set"
+          if ($LASTEXITCODE -ne 0) { throw "vcvars64.bat failed with exit code $LASTEXITCODE" }
+          foreach ($line in $envOutput) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              Set-Item -Path "env:$($matches[1])" -Value $matches[2]
+            }
+          }
+          # Prepend NASM so it shadows any bundled copies
+          $env:PATH = "$nasmDir;$env:PATH"
+
+          # Verify MSVC tools are now in PATH
+          $cl = (Get-Command cl.exe -ErrorAction SilentlyContinue).Source
+          $nmake = (Get-Command nmake.exe -ErrorAction SilentlyContinue).Source
+          Write-Host "cl.exe   : $cl"
+          Write-Host "nmake.exe: $nmake"
+          if (-not $cl -or -not $nmake) { throw "MSVC tools not in PATH after vcvars64.bat" }
+
           # Build with MSVC + NASM assembly (same as vcpkg, no no-asm)
-          cmd /c "`"$vcvars`" && set PATH=%PATH%;`"$nasmDir`" && perl Configure VC-WIN64A no-shared no-tests --prefix=`"$OPENSSL_PREFIX`" --openssldir=\etc\ssl --libdir=lib && nmake && nmake install_sw install_ssldirs"
+          # --openssldir inside prefix; install_sw = libs + headers only.
+          & perl Configure VC-WIN64A no-shared no-tests `
+            --prefix="$OPENSSL_PREFIX" --openssldir="$OPENSSL_PREFIX\ssl" --libdir=lib
+          if ($LASTEXITCODE -ne 0) { throw "perl Configure failed" }
+          & nmake
+          if ($LASTEXITCODE -ne 0) { throw "nmake failed" }
+          & nmake install_sw
+          if ($LASTEXITCODE -ne 0) { throw "nmake install_sw failed" }
 
       - name: Set OPENSSL_ROOT_DIR
         shell: bash
