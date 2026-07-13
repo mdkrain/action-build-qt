@@ -38,11 +38,9 @@ cmake_options_common:
   - "-DQT_BUILD_BENCHMARKS=OFF"
   - "-DQT_USE_DEFAULT_CMAKE_OPTIMIZATION_FLAGS=ON"
   - "-DQT_NO_FORCE_SET_CMAKE_BUILD_TYPE=ON"
-  - "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON"  # LTCG / LTO
   - "-DCMAKE_FIND_PACKAGE_TARGETS_GLOBAL=ON"
   - "-DFEATURE_relocatable=ON"
   - "-DFEATURE_optimize_size=ON"
-  - "-DFEATURE_reduce_exports=ON"
 
 # ── CMake options: only for qtbase ────────────────────────────────────────────
 cmake_options_qtbase:
@@ -70,9 +68,11 @@ cmake_options_qtbase_per_platform:
     - "-DINPUT_xcb=yes"
     - "-DINPUT_bundled_xcb_xinput=yes"
     - "-DFEATURE_fontconfig=ON"
+    - "-DFEATURE_reduce_exports=ON"  # GCC/Clang only (NOT MSVC)
   macos:
     - "-DINPUT_freetype=qt"
     - "-DFEATURE_framework=OFF"
+    - "-DFEATURE_reduce_exports=ON"  # GCC/Clang only (NOT MSVC)
 
 # ── Build optimization ─────────────────────────────────────────────────────────
 optimization:
