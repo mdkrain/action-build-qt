@@ -103,7 +103,72 @@ jobs:
             libxcb-sync-dev libxcb-util-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
             libxcb-xkb-dev libxcb-cursor-dev
 
-      # macOS runner 已自带 Xcode CLT、cmake、ninja、perl。无需额外依赖。
+      # macOS runner has Xcode CLT, cmake, ninja, perl. No extra deps needed.
+
+      # ── 4b. Build static OpenSSL (all platforms) ───────────────────────────
+      # Static OpenSSL is built from source on all 3 platforms. Qt references
+      # OpenSSL symbols (INPUT=linked), and the final executable links
+      # Qt6Network.a + libssl + libcrypto. RainBook reuses the same static
+      # OpenSSL for its own crypto code — no symbol conflict, shared state.
+      - name: Cache static OpenSSL
+        id: cache-openssl
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.workspace }}/openssl-static
+          key: openssl-static-3.5.0-v2-${{ matrix.platform }}
+
+      - name: Build static OpenSSL (Linux/macOS)
+        if: matrix.platform != 'windows' && steps.cache-openssl.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          OPENSSL_VERSION="3.5.0"
+          OPENSSL_PREFIX="${RUNNER_WORKSPACE}/openssl-static"
+          # Explicit arch target (same as vcpkg, not auto-detect via ./config)
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            OPENSSL_ARCH="linux-x86_64"
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            OPENSSL_ARCH="darwin64-arm64"
+          fi
+          echo "Building OpenSSL ${OPENSSL_VERSION} (${OPENSSL_ARCH}, static) -> ${OPENSSL_PREFIX}"
+          cd "${RUNNER_WORKSPACE}"
+          curl -L -o openssl.tar.gz \
+            "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+          tar xzf openssl.tar.gz
+          cd "openssl-${OPENSSL_VERSION}"
+          ./Configure "${OPENSSL_ARCH}" no-shared no-tests -fPIC \
+            --prefix="${OPENSSL_PREFIX}" --openssldir=/etc/ssl --libdir=lib
+          make -j"$(nproc)"
+          make install_sw install_ssldirs
+
+      - name: Install NASM (Windows)
+        if: matrix.platform == 'windows' && steps.cache-openssl.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: choco install nasm -y --no-progress
+
+      - name: Build static OpenSSL (Windows / MSVC)
+        if: matrix.platform == 'windows' && steps.cache-openssl.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $OPENSSL_VERSION = "3.5.0"
+          $OPENSSL_PREFIX = Join-Path $env:RUNNER_WORKSPACE "openssl-static"
+          Set-Location $env:RUNNER_WORKSPACE
+          Invoke-WebRequest -Uri "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz" -OutFile "openssl.tar.gz"
+          tar xzf openssl.tar.gz
+          Set-Location "openssl-$OPENSSL_VERSION"
+          # Find NASM (installed via choco)
+          $nasmPath = (Get-Command nasm -ErrorAction SilentlyContinue).Source
+          if (-not $nasmPath) { $nasmPath = "C:\Program Files\NASM\nasm.exe" }
+          Write-Host "NASM: $nasmPath"
+          # Set up MSVC environment
+          $vsRoot = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $vcvars = Join-Path $vsRoot "VC\Auxiliary\Build\vcvars64.bat"
+          $nasmDir = Split-Path $nasmPath -Parent
+          # Build with MSVC + NASM assembly (same as vcpkg, no no-asm)
+          cmd /c "`"$vcvars`" && set PATH=%PATH%;`"$nasmDir`" && perl Configure VC-WIN64A no-shared no-tests --prefix=`"$OPENSSL_PREFIX`" --openssldir=\etc\ssl --libdir=lib && nmake && nmake install_sw install_ssldirs"
+
+      - name: Set OPENSSL_ROOT_DIR
+        shell: bash
+        run: echo "OPENSSL_ROOT_DIR=${RUNNER_WORKSPACE}/openssl-static" >> "$GITHUB_ENV"
 
       # ── 5. 缓存 Qt 源码（按 Qt 版本 + 平台作为 key）──────────────────────────
       # 失败重跑或修改配置时可跳过重新下载/解压源码。源码与 CMake 选项无关，
@@ -128,6 +193,7 @@ jobs:
         shell: pwsh
         env:
           RUNNER_WORKSPACE: ${{ runner.workspace }}
+          OPENSSL_ROOT_DIR: ${{ env.OPENSSL_ROOT_DIR }}
         run: ./scripts/build-qt-windows.ps1
 
       - name: Build Qt (Linux / macOS)
@@ -136,6 +202,7 @@ jobs:
         shell: bash
         env:
           RUNNER_WORKSPACE: ${{ runner.workspace }}
+          OPENSSL_ROOT_DIR: ${{ env.OPENSSL_ROOT_DIR }}
         run: |
           chmod +x scripts/build-qt-unix.sh
           bash scripts/build-qt-unix.sh
@@ -189,11 +256,11 @@ jobs:
 
             ## Build options (vcpkg-style per-module CMake builds)
             - Static build (`BUILD_SHARED_LIBS=OFF`)
-            - LTCG (`CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON`)
             - Size optimization (`FEATURE_optimize_size=ON`)
-            - Reduced exports (`FEATURE_reduce_exports=ON`)
-            - Disabled: SSL, Widgets, D-Bus
-            - Bundled: zlib, libpng, libjpeg, PCRE2, double-conversion, HarfBuzz
+            - Reduced exports (`FEATURE_reduce_exports=ON`, Linux/macOS only)
+            - Disabled: Widgets, D-Bus
+            - SSL: static OpenSSL 3.5.0 (built from source, all platforms)
+            - Bundled: zlib, libpng, libjpeg, PCRE2, double-conversion, HarfBuzz, Freetype
 
             ## Usage
             Download the package for your platform, extract it, and set the path

@@ -52,10 +52,15 @@ cmake_options_qtbase:
   - "-DINPUT_doubleconversion=qt"
   - "-DINPUT_harfbuzz=qt"
   # Disable unneeded features
-  - "-DFEATURE_ssl=OFF"
   - "-DFEATURE_widgets=OFF"
   - "-DFEATURE_dbus=OFF"
   - "-DCMAKE_DISABLE_FIND_PACKAGE_LTTngUST=ON"
+  # SSL: static OpenSSL on all platforms (built from source in workflow)
+  # Qt .a files reference OpenSSL symbols (INPUT=linked), final executable
+  # links Qt6Network.a + libssl.a + libcrypto.a — no symbol conflict.
+  # RainBook reuses the same static OpenSSL for its own crypto code.
+  - "-DFEATURE_openssl=ON"
+  - "-DINPUT_openssl=linked"
 
 # ── Platform-specific CMake options (applied to qtbase only) ─────────────────
 cmake_options_qtbase_per_platform:
@@ -63,7 +68,7 @@ cmake_options_qtbase_per_platform:
     - "-DINPUT_freetype=qt"
     - "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"  # /MT static CRT
   linux:
-    - "-DINPUT_freetype=system"
+    - "-DINPUT_freetype=qt"       # Use Qt bundled static freetype (not system)
     - "-DFEATURE_xcb=ON"
     - "-DINPUT_xcb=yes"
     - "-DINPUT_bundled_xcb_xinput=yes"

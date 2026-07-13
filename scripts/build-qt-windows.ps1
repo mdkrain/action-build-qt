@@ -232,6 +232,41 @@ foreach ($module in $moduleList) {
     Build-Submodule $module
 }
 
+# === Copy static OpenSSL into Qt prefix =======================================
+# Copy OpenSSL static libraries + headers into the Qt install directory so
+# downstream projects (RainBook) can use the same static OpenSSL.
+if ($env:OPENSSL_ROOT_DIR -and (Test-Path "$env:OPENSSL_ROOT_DIR\lib")) {
+    Write-Step "Copy static OpenSSL into Qt prefix"
+    Write-Host "OPENSSL_ROOT_DIR=$env:OPENSSL_ROOT_DIR"
+    $sslLibDir = Join-Path $installDir "lib"
+    $sslIncDir = Join-Path $installDir "include"
+    New-Item -ItemType Directory -Force -Path $sslLibDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $sslIncDir | Out-Null
+
+    # Copy static libraries (.lib on MSVC, .a on GCC/Clang)
+    Get-ChildItem -Path "$env:OPENSSL_ROOT_DIR\lib" -Include *.lib,*.a -File -Recurse | ForEach-Object {
+        Copy-Item $_.FullName -Destination $sslLibDir -Force
+        Write-Host "  Copied: $($_.Name)"
+    }
+
+    # Copy headers
+    $sslSrcInc = Join-Path $env:OPENSSL_ROOT_DIR "include\openssl"
+    if (Test-Path $sslSrcInc) {
+        Copy-Item $sslSrcInc -Destination $sslIncDir -Recurse -Force
+        Write-Host "  Copied: openssl headers"
+    }
+
+    # Copy pkg-config files if present
+    $pcSrc = Join-Path $env:OPENSSL_ROOT_DIR "lib\pkgconfig"
+    if (Test-Path $pcSrc) {
+        $pcDst = Join-Path $sslLibDir "pkgconfig"
+        New-Item -ItemType Directory -Force -Path $pcDst | Out-Null
+        Copy-Item "$pcSrc\*.pc" $pcDst -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host "OpenSSL static libraries and headers copied to $installDir"
+}
+
 # === Write build info ==========================================================
 Write-Step "Write Qt build info"
 $qtConf = @{

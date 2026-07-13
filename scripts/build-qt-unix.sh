@@ -218,6 +218,34 @@ for module in "${MODULE_LIST[@]}"; do
     build_submodule "$module"
 done
 
+# === Copy static OpenSSL into Qt prefix (Linux only) =========================
+# When OPENSSL_ROOT_DIR is set (Linux), copy the static OpenSSL .a files and
+# headers into the Qt install directory so they are included in the package.
+# This allows downstream projects (RainBook) to use the same static OpenSSL.
+if [[ -n "${OPENSSL_ROOT_DIR:-}" && -d "${OPENSSL_ROOT_DIR}/lib" ]]; then
+    log_step "Copy static OpenSSL into Qt prefix"
+    echo "OPENSSL_ROOT_DIR=$OPENSSL_ROOT_DIR"
+    mkdir -p "$INSTALL_DIR/lib" "$INSTALL_DIR/include"
+
+    # Copy static libraries (.a files)
+    for lib in "$OPENSSL_ROOT_DIR/lib/"*.a; do
+        [[ -f "$lib" ]] && cp -a "$lib" "$INSTALL_DIR/lib/"
+    done
+
+    # Copy headers
+    if [[ -d "$OPENSSL_ROOT_DIR/include/openssl" ]]; then
+        cp -a "$OPENSSL_ROOT_DIR/include/openssl" "$INSTALL_DIR/include/"
+    fi
+
+    # Copy pkg-config files (helps CMake find_package(OpenSSL))
+    if [[ -d "$OPENSSL_ROOT_DIR/lib/pkgconfig" ]]; then
+        mkdir -p "$INSTALL_DIR/lib/pkgconfig"
+        cp -a "$OPENSSL_ROOT_DIR/lib/pkgconfig/"*.pc "$INSTALL_DIR/lib/pkgconfig/" 2>/dev/null || true
+    fi
+
+    echo "OpenSSL static libraries and headers copied to $INSTALL_DIR"
+fi
+
 # === Strip debug symbols (optional) ==========================================
 if [[ "$STRIP_DEBUG" == "true" ]]; then
     log_step "Strip debug symbols from static libraries"
