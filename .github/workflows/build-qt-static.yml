@@ -82,8 +82,8 @@ jobs:
         shell: bash
         run: |
           python scripts/read-config.py config/qt-build.yml >> "$GITHUB_ENV"
-          echo "── 解析后的构建参数 ──"
-          cat "$GITHUB_ENV" | grep -E '^(QT_VERSION|SUBMODULES|CONFIGURE_OPTIONS_)=' || true
+          echo "── Parsed build config ──"
+          cat "$GITHUB_ENV" | grep -E '^(QT_VERSION|SUBMODULES|CMAKE_OPTIONS_)=' || true
 
       # ── 4. 安装平台依赖 ────────────────────────────────────────────────────
       # Linux 需要 XCB / fontconfig / freetype 等开发包用于 Qt 平台插件。
@@ -106,18 +106,22 @@ jobs:
       # macOS runner 已自带 Xcode CLT、cmake、ninja、perl。无需额外依赖。
 
       # ── 5. 缓存 Qt 源码（按 Qt 版本 + 平台作为 key）──────────────────────────
-      # 失败重跑或修改配置时可跳过重新下载/解压源码。源码与 configure 选项无关，
-      # 因此 key 不含 config hash。
+      # 失败重跑或修改配置时可跳过重新下载/解压源码。源码与 CMake 选项无关，
+      # 因此 key 不含 config hash。缓存各子模块的源码目录和压缩包。
       - name: Cache Qt source
         id: cache-source
         uses: actions/cache@v4
         with:
-          path: ${{ runner.workspace }}/qt-src
+          path: |
+            ${{ runner.workspace }}/qtbase-src
+            ${{ runner.workspace }}/qtshadertools-src
+            ${{ runner.workspace }}/qtdeclarative-src
+            ${{ runner.workspace }}/*.tar.xz
           key: qt-src-${{ matrix.platform }}-${{ env.QT_VERSION }}
 
       # ── 6. 构建 Qt ──────────────────────────────────────────────────────────
       # 各构建脚本会输出 artifact_path / install_prefix / package_name 到 GITHUB_OUTPUT。
-      # 脚本会检测 qt-src 目录是否存在，若已缓存则跳过下载与解压。
+      # 脚本会检测各子模块源码目录是否存在，若已缓存则跳过下载与解压。
       - name: Build Qt (Windows / MSVC)
         if: matrix.platform == 'windows'
         id: build-windows
@@ -173,27 +177,30 @@ jobs:
           body: |
             # Qt Static ${{ env.QT_VERSION }}
 
-            静态构建的 Qt ${{ env.QT_VERSION }}，用于 RainBook 项目。
+            Statically built Qt ${{ env.QT_VERSION }} for the RainBook project.
 
-            ## 包含子模块
+            ## Submodules
             ${{ env.SUBMODULES }}
 
-            ## 平台
-            - **Windows**: MSVC 静态运行时（/MT），x86_64
-            - **Linux**: GCC + XCB，x86_64
-            - **macOS**: Clang，arm64（Apple Silicon）
+            ## Platforms
+            - **Windows**: MSVC static CRT (/MT), x86_64
+            - **Linux**: GCC + XCB, x86_64
+            - **macOS**: Clang, arm64 (Apple Silicon)
 
-            ## 构建选项
-            - 静态构建（`-static`）
-            - 启用 LTO（`-ltcg`）+ 体积优化（`-optimize-size`）
-            - 禁用 SSL、Widgets 以减小体积
-            - 自带 zlib/libpng/libjpeg/PCRE/HarfBuzz
+            ## Build options (vcpkg-style per-module CMake builds)
+            - Static build (`BUILD_SHARED_LIBS=OFF`)
+            - LTCG (`CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON`)
+            - Size optimization (`FEATURE_optimize_size=ON`)
+            - Reduced exports (`FEATURE_reduce_exports=ON`)
+            - Disabled: SSL, Widgets, D-Bus
+            - Bundled: zlib, libpng, libjpeg, PCRE2, double-conversion, HarfBuzz
 
-            ## 使用方式
-            下载对应平台的压缩包，解压后将路径设为 `CMAKE_PREFIX_PATH`，
-            RainBook 项目即可在 CMake 中通过 `find_package(Qt6)` 找到。
+            ## Usage
+            Download the package for your platform, extract it, and set the path
+            as `CMAKE_PREFIX_PATH`. RainBook's CMake will find Qt6 via
+            `find_package(Qt6)`.
 
-            完整构建参数请参见仓库 `config/qt-build.yml`。
+            Full build parameters: see `config/qt-build.yml` in the repo.
           fail_on_unmatched_files: false
           token: ${{ secrets.GITHUB_TOKEN }}
 

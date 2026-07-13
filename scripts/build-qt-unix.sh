@@ -1,30 +1,29 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 在 macOS 或 Linux 上构建静态 Qt。
+# Build static Qt on macOS or Linux (vcpkg-style: per-module CMake builds).
 #
-# 本脚本假设以下环境变量已被 workflow 通过 scripts/read-config.py 设置：
-#   QT_VERSION                Qt 版本（例如 6.10.2）
-#   QT_SOURCE_URL             Qt 源码下载地址
-#   QT_SOURCE_SHA256           源码 SHA-256（可选，空则跳过校验）
-#   SUBMODULES                要构建的子模块，逗号分隔
-#   SKIP_MODULES              要跳过的子模块，逗号分隔
-#   CONFIGURE_OPTIONS_COMMON  通用 configure 参数（空格分隔）
-#   CONFIGURE_OPTIONS_LINUX   Linux 专属 configure 参数（仅 Linux 用）
-#   CONFIGURE_OPTIONS_MACOS   macOS 专属 configure 参数（仅 macOS 用）
-#   CMAKE_EXTRA_ARGS_COMMON   通用 CMake 参数
-#   CMAKE_EXTRA_ARGS_LINUX    Linux 专属 CMake 参数
-#   CMAKE_EXTRA_ARGS_MACOS    macOS 专属 CMake 参数
-#   STRIP_DEBUG_SYMBOLS       是否 strip 调试符号（true/false）
-#   PARALLEL_JOBS             并行任务数（0=自动）
-#   PACKAGE_NAME_TEMPLATE     产物包命名模板
+# Each submodule is downloaded, configured, built, and installed independently
+# via CMake (not via the top-level configure wrapper).
 #
-# 用法:
+# Required environment variables (set by scripts/read-config.py):
+#   QT_VERSION                  Qt version (e.g. 6.10.2)
+#   SUBMODULE_URL_TEMPLATE      URL template with {submodule} placeholder
+#   SUBMODULES                  Comma-separated list (in dependency order)
+#   CMAKE_OPTIONS_COMMON        CMake options for ALL modules
+#   CMAKE_OPTIONS_QTBASE        Extra CMake options for qtbase only
+#   CMAKE_OPTIONS_QTBASE_LINUX  Linux-specific qtbase options
+#   CMAKE_OPTIONS_QTBASE_MACOS  macOS-specific qtbase options
+#   STRIP_DEBUG_SYMBOLS         Strip debug symbols (true/false)
+#   PARALLEL_JOBS               Parallel job count (0 = auto)
+#   PACKAGE_NAME_TEMPLATE       Artifact package name template
+#
+# Usage:
 #   bash scripts/build-qt-unix.sh [--work-dir DIR] [--install-prefix DIR]
 # =============================================================================
 
 set -euo pipefail
 
-# ── 辅助函数 ──────────────────────────────────────────────────────────────────
+# === Helper functions ========================================================
 log_step() {
     echo ""
     echo "========================================"
@@ -37,7 +36,6 @@ die() {
     exit 1
 }
 
-# 检测平台
 detect_platform() {
     case "$(uname -s)" in
         Darwin*) echo "macos" ;;
@@ -49,49 +47,34 @@ detect_platform() {
 PLATFORM="$(detect_platform)"
 echo "Detected platform: $PLATFORM"
 
-# ── 参数解析 ──────────────────────────────────────────────────────────────────
+# === Argument parsing =========================================================
 WORK_DIR="${RUNNER_WORKSPACE:-$HOME/qt-build-work}"
 INSTALL_PREFIX=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --work-dir)
-            WORK_DIR="$2"
-            shift 2
-            ;;
-        --install-prefix)
-            INSTALL_PREFIX="$2"
-            shift 2
-            ;;
-        *)
-            die "Unknown argument: $1"
-            ;;
+        --work-dir)       WORK_DIR="$2";       shift 2 ;;
+        --install-prefix) INSTALL_PREFIX="$2"; shift 2 ;;
+        *) die "Unknown argument: $1" ;;
     esac
 done
 
-# ── 校验环境变量 ──────────────────────────────────────────────────────────────
+# === Validate environment variables ===========================================
 : "${QT_VERSION:?Missing QT_VERSION (run scripts/read-config.py first)}"
-: "${QT_SOURCE_URL:?Missing QT_SOURCE_URL}"
+: "${SUBMODULE_URL_TEMPLATE:?Missing SUBMODULE_URL_TEMPLATE}"
 : "${SUBMODULES:?Missing SUBMODULES}"
-: "${CONFIGURE_OPTIONS_COMMON:?Missing CONFIGURE_OPTIONS_COMMON}"
+: "${CMAKE_OPTIONS_COMMON:?Missing CMAKE_OPTIONS_COMMON}"
 
-QT_VERSION="$QT_VERSION"
-SOURCE_URL="$QT_SOURCE_URL"
-SOURCE_SHA256="${QT_SOURCE_SHA256:-}"
-SUBMODULES="$SUBMODULES"
-SKIP_MODULES="${SKIP_MODULES:-}"
-COMMON_OPTS="$CONFIGURE_OPTIONS_COMMON"
-if [[ "$PLATFORM" == "linux" ]]; then
-    PLATFORM_OPTS="${CONFIGURE_OPTIONS_LINUX:-}"
-    CMAKE_PLATFORM="${CMAKE_EXTRA_ARGS_LINUX:-}"
-else
-    PLATFORM_OPTS="${CONFIGURE_OPTIONS_MACOS:-}"
-    CMAKE_PLATFORM="${CMAKE_EXTRA_ARGS_MACOS:-}"
-fi
-CMAKE_COMMON="${CMAKE_EXTRA_ARGS_COMMON:-}"
+IFS=',' read -ra MODULE_LIST <<< "$SUBMODULES"
+
+# Platform-specific qtbase options
+case "$PLATFORM" in
+    linux)  QTBASE_PLATFORM_OPTS="${CMAKE_OPTIONS_QTBASE_LINUX:-}" ;;
+    macos)  QTBASE_PLATFORM_OPTS="${CMAKE_OPTIONS_QTBASE_MACOS:-}" ;;
+esac
+
 STRIP_DEBUG="${STRIP_DEBUG_SYMBOLS:-false}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-0}"
-PACKAGE_TEMPLATE="${PACKAGE_NAME_TEMPLATE:-qt-{version}-static-{platform}}"
 
 if [[ "$PARALLEL_JOBS" -le 0 ]]; then
     if [[ "$PLATFORM" == "macos" ]]; then
@@ -105,184 +88,154 @@ if [[ -z "$INSTALL_PREFIX" ]]; then
     INSTALL_PREFIX="$WORK_DIR/qt-install"
 fi
 
-# 替换模板
+# Substitute package name template
+PACKAGE_TEMPLATE="${PACKAGE_NAME_TEMPLATE:-qt-{version}-static-{platform}}"
 PACKAGE_NAME="${PACKAGE_TEMPLATE/\{version\}/$QT_VERSION}"
 PACKAGE_NAME="${PACKAGE_NAME/\{platform\}/$PLATFORM}"
 
-# ── 目录规划 ──────────────────────────────────────────────────────────────────
-SRC_DIR="$WORK_DIR/qt-src"
-BUILD_DIR="$WORK_DIR/qt-build"
+# === Directory layout =========================================================
 INSTALL_DIR="$INSTALL_PREFIX"
 ARTIFACT_DIR="$WORK_DIR/artifacts"
 
-mkdir -p "$WORK_DIR" "$SRC_DIR" "$BUILD_DIR" "$INSTALL_DIR" "$ARTIFACT_DIR"
+mkdir -p "$WORK_DIR" "$INSTALL_DIR" "$ARTIFACT_DIR"
 
-log_step "Qt 静态构建参数（$PLATFORM）"
-echo "Qt 版本          : $QT_VERSION"
-echo "源码 URL         : $SOURCE_URL"
-echo "子模块           : $SUBMODULES"
-echo "跳过模块         : ${SKIP_MODULES:-（无）}"
-echo "通用 configure   : $COMMON_OPTS"
-echo "$PLATFORM configure: $PLATFORM_OPTS"
-echo "通用 CMake       : ${CMAKE_COMMON:-（无）}"
-echo "$PLATFORM CMake    : ${CMAKE_PLATFORM:-（无）}"
-echo "并行任务数       : $PARALLEL_JOBS"
-echo "Strip 调试符号   : $STRIP_DEBUG"
-echo "工作目录         : $WORK_DIR"
-echo "安装前缀         : $INSTALL_DIR"
-echo "产物包名         : $PACKAGE_NAME"
+log_step "Qt static build parameters (${PLATFORM})"
+echo "Qt version        : $QT_VERSION"
+echo "Submodules        : ${MODULE_LIST[*]}"
+echo "Common CMake opts : $CMAKE_OPTIONS_COMMON"
+echo "QtBase CMake opts : ${CMAKE_OPTIONS_QTBASE:-(none)}"
+echo "QtBase platform   : ${QTBASE_PLATFORM_OPTS:-(none)}"
+echo "Parallel jobs     : $PARALLEL_JOBS"
+echo "Strip debug syms  : $STRIP_DEBUG"
+echo "Work directory    : $WORK_DIR"
+echo "Install prefix    : $INSTALL_DIR"
+echo "Package name      : $PACKAGE_NAME"
 
-# ── Step 1: 验证构建工具 ──────────────────────────────────────────────────────
-log_step "Step 1: 验证构建工具"
+# === Verify build tools =======================================================
+log_step "Step 0: Verify build tools"
 for tool in cmake ninja python3 perl; do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-        die "Required tool not in PATH: $tool"
-    fi
+    command -v "$tool" >/dev/null 2>&1 || die "Required tool not in PATH: $tool"
     echo "$(printf '%-10s' "$tool"): $(command -v "$tool")"
 done
 
-# macOS 需要 Xcode 命令行工具（提供 clang）
 if [[ "$PLATFORM" == "macos" ]]; then
-    if ! xcode-select -p >/dev/null 2>&1; then
-        die "Xcode command line tools not installed. Run: xcode-select --install"
-    fi
+    xcode-select -p >/dev/null 2>&1 || die "Xcode command line tools not installed"
     echo "Xcode path        : $(xcode-select -p)"
 fi
 
-# ── Step 2: 下载 Qt 源码 ──────────────────────────────────────────────────────
-log_step "Step 2: 下载 Qt 源码"
+# === Build each submodule =====================================================
+build_submodule() {
+    local module="$1"
+    local src_dir="$WORK_DIR/${module}-src"
+    local build_dir="$WORK_DIR/${module}-build"
+    local archive_path="$WORK_DIR/${module}.tar.xz"
 
-if [[ -f "$SRC_DIR/configure" ]]; then
-    echo "Qt 源码已存在，跳过下载: $SRC_DIR"
-else
-    ARCHIVE_PATH="$WORK_DIR/qt-src.tar.xz"
-    if [[ -f "$ARCHIVE_PATH" ]]; then
-        echo "归档已存在，跳过下载: $ARCHIVE_PATH"
+    log_step "Building: ${module}"
+
+    # --- Download ---
+    local download_url="${SUBMODULE_URL_TEMPLATE/\{submodule\}/$module}"
+    if [[ -f "$src_dir/CMakeLists.txt" ]]; then
+        echo "Source already exists, skipping download: $src_dir"
     else
-        echo "下载: $SOURCE_URL"
-        # 使用 curl 支持断点续传
-        curl -L --fail --retry 3 --retry-delay 5 -C - -o "$ARCHIVE_PATH" "$SOURCE_URL"
-    fi
-
-    # SHA-256 校验
-    if [[ -n "$SOURCE_SHA256" ]]; then
-        echo "校验 SHA-256 ..."
-        ACTUAL_HASH="$(sha256sum "$ARCHIVE_PATH" | awk '{print $1}')"
-        if [[ "${ACTUAL_HASH,,}" != "${SOURCE_SHA256,,}" ]]; then
-            die "SHA-256 mismatch: expected=$SOURCE_SHA256 actual=$ACTUAL_HASH"
-        fi
-        echo "SHA-256 校验通过"
-    else
-        echo "未提供 SHA-256，跳过校验"
-    fi
-
-    # 解压到 srcDir
-    echo "解压到: $SRC_DIR"
-    # Qt 源码归档内含一层目录（qt-everywhere-src-<version>），先解压到临时目录再移动
-    EXTRACT_TMP="$WORK_DIR/qt-extract-tmp"
-    rm -rf "$EXTRACT_TMP"
-    mkdir -p "$EXTRACT_TMP"
-    tar -xf "$ARCHIVE_PATH" -C "$EXTRACT_TMP"
-
-    # 将内层目录移动到 $SRC_DIR
-    INNER_DIR="$(find "$EXTRACT_TMP" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-    if [[ -n "$INNER_DIR" ]]; then
-        # 用 rsync 保留属性；若没有 rsync 用 mv
-        if command -v rsync >/dev/null 2>&1; then
-            rsync -a "$INNER_DIR/" "$SRC_DIR/"
+        if [[ ! -f "$archive_path" ]]; then
+            echo "Downloading: $download_url"
+            curl -L --fail --retry 3 --retry-delay 5 -C - -o "$archive_path" "$download_url"
         else
-            mv "$INNER_DIR"/* "$SRC_DIR/" 2>/dev/null || true
-            mv "$INNER_DIR"/.* "$SRC_DIR/" 2>/dev/null || true
+            echo "Archive already exists: $archive_path"
+        fi
+
+        # Extract (archive contains a top-level dir, move contents to src_dir)
+        echo "Extracting to: $src_dir"
+        local extract_tmp="$WORK_DIR/${module}-extract-tmp"
+        rm -rf "$extract_tmp"
+        mkdir -p "$extract_tmp"
+        tar -xf "$archive_path" -C "$extract_tmp"
+
+        local inner_dir
+        inner_dir="$(find "$extract_tmp" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+        if [[ -n "$inner_dir" ]]; then
+            mkdir -p "$src_dir"
+            if command -v rsync >/dev/null 2>&1; then
+                rsync -a "$inner_dir/" "$src_dir/"
+            else
+                cp -a "$inner_dir/." "$src_dir/"
+            fi
+        fi
+        rm -rf "$extract_tmp"
+    fi
+
+    [[ -f "$src_dir/CMakeLists.txt" ]] || die "CMakeLists.txt not found in $src_dir"
+
+    # --- CMake configure ---
+    # Build the CMake options array
+    local cmake_args=()
+    cmake_args+=("-S" "$src_dir" "-B" "$build_dir" "-G" "Ninja")
+    cmake_args+=("-DCMAKE_INSTALL_PREFIX=$INSTALL_DIR")
+
+    # Modules after qtbase need to find the installed qtbase
+    if [[ "$module" != "qtbase" ]]; then
+        cmake_args+=("-DCMAKE_PREFIX_PATH=$INSTALL_DIR")
+    fi
+
+    # Common options
+    # shellcheck disable=SC2206
+    cmake_args+=($CMAKE_OPTIONS_COMMON)
+
+    # qtbase-specific options
+    if [[ "$module" == "qtbase" ]]; then
+        if [[ -n "${CMAKE_OPTIONS_QTBASE:-}" ]]; then
+            # shellcheck disable=SC2206
+            cmake_args+=($CMAKE_OPTIONS_QTBASE)
+        fi
+        if [[ -n "${QTBASE_PLATFORM_OPTS:-}" ]]; then
+            # shellcheck disable=SC2206
+            cmake_args+=($QTBASE_PLATFORM_OPTS)
         fi
     fi
-    rm -rf "$EXTRACT_TMP"
-fi
 
-# 验证源码
-CONFIGURE_SCRIPT="$SRC_DIR/configure"
-if [[ ! -f "$CONFIGURE_SCRIPT" ]]; then
-    die "configure script not found in source dir: $SRC_DIR"
-fi
+    echo "CMake configure options:"
+    printf '  %s\n' "${cmake_args[@]}"
 
-# ── Step 3: 配置 Qt ──────────────────────────────────────────────────────────
-log_step "Step 3: 配置 Qt"
+    cmake "${cmake_args[@]}"
 
-# 清理 build 目录确保干净环境
-if [[ -f "$BUILD_DIR/CMakeCache.txt" ]]; then
-    echo "清理旧的 CMakeCache.txt ..."
-    rm -f "$BUILD_DIR/CMakeCache.txt"
-fi
+    # --- Build ---
+    echo "Building ${module} (parallel: ${PARALLEL_JOBS}) ..."
+    cmake --build "$build_dir" --parallel "$PARALLEL_JOBS"
 
-cd "$BUILD_DIR"
+    # --- Install ---
+    echo "Installing ${module} to ${INSTALL_DIR} ..."
+    cmake --install "$build_dir"
 
-# 构造 configure 参数数组
-CONFIGURE_ARGS=()
-CONFIGURE_ARGS+=("$SRC_DIR/configure")
+    echo "Done: ${module}"
+}
 
-# 通用选项
-if [[ -n "$COMMON_OPTS" ]]; then
-    # shellcheck disable=SC2206
-    CONFIGURE_ARGS+=($COMMON_OPTS)
-fi
-# 平台专属选项
-if [[ -n "$PLATFORM_OPTS" ]]; then
-    # shellcheck disable=SC2206
-    CONFIGURE_ARGS+=($PLATFORM_OPTS)
-fi
-# 子模块
-if [[ -n "$SUBMODULES" ]]; then
-    CONFIGURE_ARGS+=("-submodules" "$SUBMODULES")
-fi
-# 跳过模块
-if [[ -n "$SKIP_MODULES" ]]; then
-    CONFIGURE_ARGS+=("-skip" "$SKIP_MODULES")
-fi
-# 安装前缀
-CONFIGURE_ARGS+=("-prefix" "$INSTALL_DIR")
+# Build all submodules in order
+TOTAL_MODULES=${#MODULE_LIST[@]}
+CURRENT=0
+for module in "${MODULE_LIST[@]}"; do
+    CURRENT=$((CURRENT + 1))
+    log_step "Module ${CURRENT}/${TOTAL_MODULES}: ${module}"
+    build_submodule "$module"
+done
 
-# 透传 CMake 参数（通过 -- 分隔）
-CMAKE_ARGS_STR="$CMAKE_COMMON $CMAKE_PLATFORM"
-CMAKE_ARGS_STR="${CMAKE_ARGS_STR#"${CMAKE_ARGS_STR%%[![:space:]]*}"}"  # 去除前导空格
-if [[ -n "$CMAKE_ARGS_STR" ]]; then
-    CONFIGURE_ARGS+=("--")
-    # shellcheck disable=SC2206
-    CONFIGURE_ARGS+=($CMAKE_ARGS_STR)
-fi
-
-echo "调用 configure ..."
-echo "参数: ${CONFIGURE_ARGS[*]}"
-"${CONFIGURE_ARGS[@]}"
-
-# ── Step 4: 构建 Qt ──────────────────────────────────────────────────────────
-log_step "Step 4: 构建 Qt（并行任务数: $PARALLEL_JOBS）"
-cmake --build . --parallel "$PARALLEL_JOBS"
-
-# ── Step 5: 安装 Qt ──────────────────────────────────────────────────────────
-log_step "Step 5: 安装 Qt 到 $INSTALL_DIR"
-cmake --install .
-
-# ── Step 6: strip 调试符号（可选）──────────────────────────────────────────────
+# === Strip debug symbols (optional) ==========================================
 if [[ "$STRIP_DEBUG" == "true" ]]; then
-    log_step "Step 6: strip 静态库调试符号"
-    echo "在 $INSTALL_DIR 中查找 .a 文件 ..."
+    log_step "Strip debug symbols from static libraries"
     FOUND_COUNT=0
     while IFS= read -r -d '' lib_file; do
-        # 仅 strip 静态库的调试符号，保留符号表
         strip --strip-debug "$lib_file" 2>/dev/null || true
         FOUND_COUNT=$((FOUND_COUNT + 1))
     done < <(find "$INSTALL_DIR" -type f -name '*.a' -print0)
-    echo "已 strip $FOUND_COUNT 个静态库文件"
-else
-    log_step "Step 6: 跳过 strip 调试符号"
+    echo "Stripped $FOUND_COUNT static library files"
 fi
 
-# ── Step 7: 写入环境信息（供下游项目使用）──────────────────────────────────────
-log_step "Step 7: 写入 Qt 环境信息"
-QT_CONF_PATH="$INSTALL_DIR/qt-static-build-info.json"
+# === Write build info ==========================================================
+log_step "Write Qt build info"
 HOST_ARCH="$(uname -m)"
 COMPILER_NAME="gcc"
 [[ "$PLATFORM" == "macos" ]] && COMPILER_NAME="clang"
 
+QT_CONF_PATH="$INSTALL_DIR/qt-static-build-info.json"
 cat > "$QT_CONF_PATH" <<EOF
 {
   "version": "$QT_VERSION",
@@ -290,31 +243,26 @@ cat > "$QT_CONF_PATH" <<EOF
   "host": "$PLATFORM-$HOST_ARCH",
   "static": true,
   "modules": [$(echo "$SUBMODULES" | tr ',' '\n' | sed 's/^/"/;s/$/"/' | paste -sd,)],
-  "skip": [$(echo "$SKIP_MODULES" | tr ',' '\n' | sed 's/^/"/;s/$/"/' | paste -sd,)],
   "compiler": "$COMPILER_NAME"
 }
 EOF
-echo "已写入构建信息: $QT_CONF_PATH"
+echo "Build info written to: $QT_CONF_PATH"
 
-# ── Step 8: 打包产物 ─────────────────────────────────────────────────────────
-log_step "Step 8: 打包产物"
+# === Package artifact ==========================================================
+log_step "Package artifact"
 ARCHIVE_PATH="$ARTIFACT_DIR/$PACKAGE_NAME.tar.xz"
 rm -f "$ARCHIVE_PATH"
 
-echo "压缩 $INSTALL_DIR → $ARCHIVE_PATH"
-# 使用 xz 压缩（Linux/macOS 通用，压缩率高于 gz）
-# -C $INSTALL_DIR：进入安装目录后再打包，避免归档内嵌套 qt-install/ 路径
-# 使用 transform 去掉路径前缀
+echo "Compressing $INSTALL_DIR -> $ARCHIVE_PATH"
 tar -cJf "$ARCHIVE_PATH" -C "$(dirname "$INSTALL_DIR")" "$(basename "$INSTALL_DIR")"
 
 echo ""
 echo "========================================"
-echo "  构建成功"
+echo "  Build succeeded"
 echo "========================================"
-echo "产物路径: $ARCHIVE_PATH"
-echo "安装前缀: $INSTALL_DIR"
+echo "Artifact path: $ARCHIVE_PATH"
+echo "Install prefix: $INSTALL_DIR"
 
-# 输出产物路径到 GITHUB_OUTPUT（供 workflow 后续步骤使用）
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "artifact_path=$ARCHIVE_PATH" >> "$GITHUB_OUTPUT"
     echo "install_prefix=$INSTALL_DIR" >> "$GITHUB_OUTPUT"

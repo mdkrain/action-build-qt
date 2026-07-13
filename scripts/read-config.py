@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """
-读取 config/qt-build.yml 并输出环境变量赋值。
+Read config/qt-build.yml and emit environment variable assignments.
 
-支持的输出格式（--format）:
-  github      输出 KEY=VALUE 行，可直接追加到 $GITHUB_ENV（默认）
-  bash        输出 export KEY="VALUE" 行，可被 eval 执行
-  powershell  输出 $env:KEY = "VALUE" 行，可被 Invoke-Expression 执行
+Supported output formats (--format):
+  github      Emit KEY=VALUE lines, suitable for appending to $GITHUB_ENV
+              (default).
+  bash        Emit `export KEY="VALUE"` lines, suitable for `eval`.
+  powershell  Emit `$env:KEY = "VALUE"` lines, suitable for Invoke-Expression.
 
-用法:
-  # GitHub Actions 中（后续步骤可见环境变量）
+Usage:
+  # In GitHub Actions (subsequent steps see the env vars)
   python scripts/read-config.py config/qt-build.yml >> $GITHUB_ENV
 
-  # Bash 中即时生效
+  # In Bash (takes effect immediately)
   eval "$(python3 scripts/read-config.py config/qt-build.yml --format=bash)"
 
-  # PowerShell 中即时生效
+  # In PowerShell (takes effect immediately)
   python scripts/read-config.py config/qt-build.yml --format=powershell | Invoke-Expression
 """
 import argparse
@@ -22,7 +23,8 @@ import shlex
 import sys
 from pathlib import Path
 
-# PyYAML 在 GitHub Actions 预装的 Python 中可用；本地若未安装则提示。
+# PyYAML ships with the Python preinstalled on GitHub Actions runners.
+# If missing locally, print a helpful error.
 try:
     import yaml
 except ImportError:
@@ -32,25 +34,25 @@ except ImportError:
 
 
 def flatten_config(cfg: dict) -> dict:
-    """将嵌套的 YAML 配置展平为 KEY=VALUE 形式。
+    """Flatten the nested YAML config into KEY=VALUE pairs.
 
-    列表以空格连接为字符串；保留原始顺序便于 shell word-split 使用。
+    Lists of CMake options are joined with spaces so the shell can word-split
+    them when consumed unquoted. Submodule names are joined with commas.
     """
     qt_version = str(cfg.get("qt_version", ""))
-    # 计算主.次 版本号（例如 6.10.2 → 6.10），用于 download.qt.io URL
+    # Compute major.minor (e.g. 6.10.2 -> 6.10) for the download URL.
     parts = qt_version.split(".")
     minor = ".".join(parts[:2]) if len(parts) >= 2 else qt_version
 
-    source_url = str(cfg.get("qt_source_url", "")).format(
-        version=qt_version, minor=minor
-    )
+    # Use replace() not format() to leave {submodule} as-is for the build script
+    url_template = str(cfg.get("submodule_url_template", ""))
+    url_template = url_template.replace("{version}", qt_version)
+    url_template = url_template.replace("{minor}", minor)
 
     submodules = cfg.get("submodules", []) or []
-    skip_modules = cfg.get("skip_modules", []) or []
-    common_opts = cfg.get("configure_options_common", []) or []
-    per_platform = cfg.get("configure_options_per_platform", {}) or {}
-    cmake_common = cfg.get("cmake_extra_args_common", []) or []
-    cmake_per_platform = cfg.get("cmake_extra_args_per_platform", {}) or {}
+    common_opts = cfg.get("cmake_options_common", []) or []
+    qtbase_opts = cfg.get("cmake_options_qtbase", []) or []
+    qtbase_per_platform = cfg.get("cmake_options_qtbase_per_platform", {}) or {}
     optimization = cfg.get("optimization", {}) or {}
 
     def join(items):
@@ -59,18 +61,13 @@ def flatten_config(cfg: dict) -> dict:
     return {
         "QT_VERSION": qt_version,
         "QT_MINOR": minor,
-        "QT_SOURCE_URL": source_url,
-        "QT_SOURCE_SHA256": str(cfg.get("qt_source_sha256", "") or ""),
+        "SUBMODULE_URL_TEMPLATE": url_template,
         "SUBMODULES": ",".join(submodules),
-        "SKIP_MODULES": ",".join(skip_modules),
-        "CONFIGURE_OPTIONS_COMMON": join(common_opts),
-        "CONFIGURE_OPTIONS_WINDOWS": join(per_platform.get("windows", []) or []),
-        "CONFIGURE_OPTIONS_LINUX": join(per_platform.get("linux", []) or []),
-        "CONFIGURE_OPTIONS_MACOS": join(per_platform.get("macos", []) or []),
-        "CMAKE_EXTRA_ARGS_COMMON": join(cmake_common),
-        "CMAKE_EXTRA_ARGS_WINDOWS": join(cmake_per_platform.get("windows", []) or []),
-        "CMAKE_EXTRA_ARGS_LINUX": join(cmake_per_platform.get("linux", []) or []),
-        "CMAKE_EXTRA_ARGS_MACOS": join(cmake_per_platform.get("macos", []) or []),
+        "CMAKE_OPTIONS_COMMON": join(common_opts),
+        "CMAKE_OPTIONS_QTBASE": join(qtbase_opts),
+        "CMAKE_OPTIONS_QTBASE_WINDOWS": join(qtbase_per_platform.get("windows", []) or []),
+        "CMAKE_OPTIONS_QTBASE_LINUX": join(qtbase_per_platform.get("linux", []) or []),
+        "CMAKE_OPTIONS_QTBASE_MACOS": join(qtbase_per_platform.get("macos", []) or []),
         "STRIP_DEBUG_SYMBOLS": str(optimization.get("strip_debug_symbols", False)).lower(),
         "PARALLEL_JOBS": str(optimization.get("parallel_jobs", 0)),
         "PACKAGE_NAME_TEMPLATE": str(cfg.get("package_name_template",
@@ -80,20 +77,16 @@ def flatten_config(cfg: dict) -> dict:
 
 def output_github(env: dict) -> None:
     for key, value in env.items():
-        # GitHub Actions 的 $GITHUB_ENV 支持 KEY=value 形式
-        # 多行值需要特殊分隔符，这里所有值都是单行，所以直接写。
         print(f"{key}={value}")
 
 
 def output_bash(env: dict) -> None:
     for key, value in env.items():
-        # 使用 shlex.quote 安全包装值
         print(f"export {key}={shlex.quote(str(value))}")
 
 
 def output_powershell(env: dict) -> None:
     for key, value in env.items():
-        # PowerShell 单引号字符串中只需将 ' 替换为 ''
         escaped = str(value).replace("'", "''")
         print(f"$env:{key} = '{escaped}'")
 
