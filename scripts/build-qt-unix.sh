@@ -88,8 +88,16 @@ if [[ -z "$INSTALL_PREFIX" ]]; then
     INSTALL_PREFIX="$WORK_DIR/qt-install"
 fi
 
-# Substitute package name template
-PACKAGE_TEMPLATE="${PACKAGE_NAME_TEMPLATE:-qt-{version}-static-{platform}}"
+# Substitute package name template.
+# NOTE: Do NOT inline the default into ${PACKAGE_NAME_TEMPLATE:-...} because
+# bash does not brace-match the default value -- the first '}' ends the
+# expansion, producing a broken template like "qt-{version}-static-{platform}"
+# followed by literal "-static-{platform}}".
+if [[ -z "${PACKAGE_NAME_TEMPLATE:-}" ]]; then
+    PACKAGE_TEMPLATE="qt-{version}-static-{platform}"
+else
+    PACKAGE_TEMPLATE="$PACKAGE_NAME_TEMPLATE"
+fi
 PACKAGE_NAME="${PACKAGE_TEMPLATE/\{version\}/$QT_VERSION}"
 PACKAGE_NAME="${PACKAGE_NAME/\{platform\}/$PLATFORM}"
 
