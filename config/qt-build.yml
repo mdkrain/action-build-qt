@@ -84,7 +84,11 @@ cmake_options_qtbase_per_platform:
     # Xcode 26 Clang treats implicit function declarations as errors (C99
     # standard enforcement). Qt 6.10.2 qyieldcpu.h uses __yield() without
     # including <arm_acle.h>. Downgrade this specific error back to a warning.
+    # Must set BOTH CXX_FLAGS and OBJCXX_FLAGS: CMake 3.16+ separates
+    # Objective-C++ flags from C++ flags, and qfilesystemengine_unix.cpp
+    # is compiled as OBJCXX (-x objective-c++).
     - "-DCMAKE_CXX_FLAGS=-Wno-error=implicit-function-declaration"
+    - "-DCMAKE_OBJCXX_FLAGS=-Wno-error=implicit-function-declaration"
 
 # ── Build optimization ─────────────────────────────────────────────────────────
 optimization:
