@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 本地构建产物（若在仓库目录内本地测试构建）
+qt-src/
+qt-build/
+qt-install/
+artifacts/
+*.zip
+*.tar.xz
+*.tar.gz
+*.7z
+
+# 构建脚本输出
+env.txt
+GITHUB_OUTPUT.txt

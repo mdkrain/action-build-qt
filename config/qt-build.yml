@@ -1,0 +1,92 @@
+# ==============================================================================
+# Qt 静态构建配置文件
+# ------------------------------------------------------------------------------
+# 修改此文件即可调整 Qt 静态库的构建参数，无需改动 workflow 或脚本。
+# 此处默认配置针对 RainBook 项目（C:\Users\mwx\RainBook\CMakeLists.txt）所需：
+#   Qt6 模块: Core, Gui, Qml, Quick, QuickControls2, QuickDialogs2, Concurrent
+# ==============================================================================
+
+# ── Qt 源码版本 ───────────────────────────────────────────────────────────────
+# Qt 版本号（与官方 download.qt.io 路径一致）
+qt_version: "6.10.2"
+
+# Qt 源码归档 URL 模板。{version} 会被替换为 qt_version；{minor} 会被替换为
+# 主.次 版本（例如 6.10）。
+qt_source_url: "https://download.qt.io/official_releases/qt/{minor}/{version}/single/qt-everywhere-src-{version}.tar.xz"
+
+# 源码归档的 SHA-256 校验和（可选，留空则跳过校验）
+qt_source_sha256: ""
+
+# ── Qt 子模块选择 ─────────────────────────────────────────────────────────────
+# 通过 Qt 的 -submodules 参数构建。仅构建 RainBook 需要的模块以节省时间：
+#   qtbase            → Core, Gui, Concurrent
+#   qtshadertools     → qtdeclarative 的隐式依赖
+#   qtdeclarative    → Qml, Quick
+#   qtquickcontrols2 → QuickControls2
+#   qtquickdialogs   → QuickDialogs2
+submodules:
+  - qtbase
+  - qtshadertools
+  - qtdeclarative
+  - qtquickcontrols2
+  - qtquickdialogs
+
+# 通过 Qt 的 -skip 参数跳过的子模块。当 submodules 已显式列出时通常留空。
+skip_modules: []
+
+# ── 通用 configure 参数（所有平台共用）─────────────────────────────────────
+configure_options_common:
+  - "-static"             # 静态构建（核心）
+  - "-release"            # Release 构建
+  - "-opensource"         # 开源版
+  - "-confirm-license"    # 自动接受许可
+  - "-ltcg"               # 链接时代码优化（LTO），减小体积提升性能
+  - "-optimize-size"      # 优化体积而非速度
+  - "-reduce-exports"     # 减少导出符号
+  - "-nomake"             # 不构建
+  - "examples"            #   examples
+  - "-nomake"             # 不构建
+  - "tests"               #   tests
+  - "-qt-zlib"            # 使用 Qt 自带的 zlib（避免系统依赖）
+  - "-qt-libpng"          # 使用 Qt 自带的 libpng
+  - "-qt-libjpeg"         # 使用 Qt 自带的 libjpeg
+  - "-qt-pcre"            # 使用 Qt 自带的 PCRE2
+  - "-qt-doubleconversion" # 使用 Qt 自带的 double-conversion
+  - "-qt-harfbuzz"        # 使用 Qt 自带的 HarfBuzz
+  - "-no-feature-ssl"     # 禁用 SSL（避免静态 OpenSSL 依赖）
+  - "-no-feature-widgets" # 禁用 QtWidgets（RainBook 仅使用 QtQuick）
+
+# ── 平台专属 configure 参数 ───────────────────────────────────────────────────
+configure_options_per_platform:
+  windows:
+    - "-static-runtime"   # 静态链接 MSVC 运行时（/MT）
+  linux:
+    - "-xcb"              # 启用 XCB 平台插件
+    - "-bundled-xcb-xinput"  # 内置 xcb-xinput（避免对系统版本要求）
+    - "-fontconfig"       # 启用 fontconfig
+    - "-system-freetype"  # 使用系统 freetype（fontconfig 依赖）
+    - "-no-dbus"          # 禁用 D-Bus（RainBook 不需要）
+  macos:
+    - "-no-framework"     # 不构建 framework（静态构建建议关闭）
+
+# ── 透传给 Qt configure 的 CMake 参数（通过 -- ）─────────────────────────────
+cmake_extra_args_common: []
+
+cmake_extra_args_per_platform:
+  windows: []
+  linux: []
+  # macOS 可通过 CMAKE_OSX_ARCHITECTURES 构建通用二进制。
+  # 默认留空（仅构建当前 runner 原生架构）。
+  # 通用二进制示例: ["-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"]
+  macos: []
+
+# ── 构建优化 ───────────────────────────────────────────────────────────────────
+optimization:
+  # 构建完成后 strip 静态库中的调试符号（仅 Linux/macOS 有效）
+  strip_debug_symbols: true
+  # 并行构建任务数。0 表示自动使用所有可用核心。
+  parallel_jobs: 0
+
+# ── 产物包命名 ───────────────────────────────────────────────────────────────
+# {version} 替换为 qt_version；{platform} 替换为 windows/linux/macos
+package_name_template: "qt-{version}-static-{platform}"

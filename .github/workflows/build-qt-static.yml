@@ -1,0 +1,223 @@
+# =============================================================================
+# Qt 静态库构建工作流
+# ------------------------------------------------------------------------------
+# 在 Windows (MSVC) / Linux (GCC) / macOS (Clang) 三平台上同时构建静态 Qt，
+# 并将产物上传到指定的 GitHub Release。
+#
+# 触发方式：手动（Actions 页面 → Run workflow）
+# 输入参数：
+#   tag_name   : Release 标签名（如 "qt-static-6.10.2"）。不存在时自动创建。
+#   prerelease : 是否标记为预发布（默认 false）
+#   draft      : 是否作为草稿创建（默认 false）
+#
+# 构建参数：见 config/qt-build.yml（修改此文件即可调整 Qt 版本/模块/选项）
+# ==============================================================================
+name: Build Static Qt
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release 标签名（例如 qt-static-6.10.2）"
+        required: true
+        type: string
+      prerelease:
+        description: "标记为预发布"
+        required: false
+        default: false
+        type: boolean
+      draft:
+        description: "创建为草稿（不会公开发布）"
+        required: false
+        default: false
+        type: boolean
+
+# Release 上传需要写入权限
+permissions:
+  contents: write
+
+# 防止同一 tag 的并行构建冲突
+concurrency:
+  group: build-qt-static-${{ inputs.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Qt (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360  # Qt 静态构建耗时较长，给 6 小时上限
+
+    strategy:
+      fail-fast: false  # 单平台失败不影响其他平台继续构建
+      matrix:
+        include:
+          - platform: windows
+            runner: windows-latest
+            shell: pwsh
+          - platform: linux
+            runner: ubuntu-latest
+            shell: bash
+          - platform: macos
+            runner: macos-latest
+            shell: bash
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Python + PyYAML ─────────────────────────────────────────────────
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PyYAML
+        shell: bash
+        run: python -m pip install --quiet pyyaml
+
+      # ── 3. 读取 config/qt-build.yml 并导出环境变量 ────────────────────────
+      # read-config.py 输出 KEY=VALUE 行，追加到 $GITHUB_ENV 后续步骤可见。
+      - name: Read build config
+        shell: bash
+        run: |
+          python scripts/read-config.py config/qt-build.yml >> "$GITHUB_ENV"
+          echo "── 解析后的构建参数 ──"
+          cat "$GITHUB_ENV" | grep -E '^(QT_VERSION|SUBMODULES|CONFIGURE_OPTIONS_)=' || true
+
+      # ── 4. 安装平台依赖 ────────────────────────────────────────────────────
+      # Linux 需要 XCB / fontconfig / freetype 等开发包用于 Qt 平台插件。
+      - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build python3 perl pkg-config flex bison gperf \
+            libgl1-mesa-dev libglu1-mesa-dev \
+            libfontconfig1-dev libfreetype6-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libxcb1-dev libx11-xcb-dev libxcb-glx0-dev \
+            libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev \
+            libxcb-randr0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev \
+            libxcb-sync-dev libxcb-util-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
+            libxcb-xkb-dev libxcb-cursor-dev
+
+      # macOS runner 已自带 Xcode CLT、cmake、ninja、perl。无需额外依赖。
+
+      # ── 5. 缓存 Qt 源码（按 Qt 版本 + 平台作为 key）──────────────────────────
+      # 失败重跑或修改配置时可跳过重新下载/解压源码。源码与 configure 选项无关，
+      # 因此 key 不含 config hash。
+      - name: Cache Qt source
+        id: cache-source
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.workspace }}/qt-src
+          key: qt-src-${{ matrix.platform }}-${{ env.QT_VERSION }}
+
+      # ── 6. 构建 Qt ──────────────────────────────────────────────────────────
+      # 各构建脚本会输出 artifact_path / install_prefix / package_name 到 GITHUB_OUTPUT。
+      # 脚本会检测 qt-src 目录是否存在，若已缓存则跳过下载与解压。
+      - name: Build Qt (Windows / MSVC)
+        if: matrix.platform == 'windows'
+        id: build-windows
+        shell: pwsh
+        env:
+          RUNNER_WORKSPACE: ${{ runner.workspace }}
+        run: ./scripts/build-qt-windows.ps1
+
+      - name: Build Qt (Linux / macOS)
+        if: matrix.platform != 'windows'
+        id: build-unix
+        shell: bash
+        env:
+          RUNNER_WORKSPACE: ${{ runner.workspace }}
+        run: |
+          chmod +x scripts/build-qt-unix.sh
+          bash scripts/build-qt-unix.sh
+
+      # 统一获取产物路径（两个 id 中只有当前平台那个会有值）
+      - name: Resolve artifact path
+        id: artifact
+        shell: bash
+        run: |
+          ARTIFACT_PATH="${{ steps.build-windows.outputs.artifact_path }}${{ steps.build-unix.outputs.artifact_path }}"
+          if [[ -z "$ARTIFACT_PATH" ]]; then
+            echo "No artifact path found" >&2
+            exit 1
+          fi
+          echo "artifact_path=$ARTIFACT_PATH" >> "$GITHUB_OUTPUT"
+          echo "Artifact: $ARTIFACT_PATH"
+          ls -lh "$ARTIFACT_PATH"
+
+      # ── 7. 上传 artifact（便于调试时下载）───────────────────────────────────
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qt-static-${{ matrix.platform }}-${{ env.QT_VERSION }}
+          path: ${{ steps.artifact.outputs.artifact_path }}
+          retention-days: 14
+          compression-level: 0  # 产物已压缩，不再二次压缩
+
+      # ── 8. 上传到 GitHub Release ─────────────────────────────────────────────
+      # 使用 softprops/action-gh-release：自动创建/更新指定 tag 的 Release。
+      # 矩阵中三个 job 各自上传本平台产物到同一 Release，互不冲突。
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          files: ${{ steps.artifact.outputs.artifact_path }}
+          prerelease: ${{ inputs.prerelease }}
+          draft: ${{ inputs.draft }}
+          name: Qt Static ${{ env.QT_VERSION }}
+          body: |
+            # Qt Static ${{ env.QT_VERSION }}
+
+            静态构建的 Qt ${{ env.QT_VERSION }}，用于 RainBook 项目。
+
+            ## 包含子模块
+            ${{ env.SUBMODULES }}
+
+            ## 平台
+            - **Windows**: MSVC 静态运行时（/MT），x86_64
+            - **Linux**: GCC + XCB，x86_64
+            - **macOS**: Clang，arm64（Apple Silicon）
+
+            ## 构建选项
+            - 静态构建（`-static`）
+            - 启用 LTO（`-ltcg`）+ 体积优化（`-optimize-size`）
+            - 禁用 SSL、Widgets 以减小体积
+            - 自带 zlib/libpng/libjpeg/PCRE/HarfBuzz
+
+            ## 使用方式
+            下载对应平台的压缩包，解压后将路径设为 `CMAKE_PREFIX_PATH`，
+            RainBook 项目即可在 CMake 中通过 `find_package(Qt6)` 找到。
+
+            完整构建参数请参见仓库 `config/qt-build.yml`。
+          fail_on_unmatched_files: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── 构建完成后输出汇总 ───────────────────────────────────────────────────────
+  summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: build
+    if: always()
+
+    steps:
+      - name: Print result
+        run: |
+          echo "## Qt Static Build Result" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Platform | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          for platform in windows linux macos; do
+            result="${{ needs.build.result }}"
+            # 简化展示：所有矩阵结果聚合在 build.result 中
+            echo "| $platform | $result |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Release tag: ${{ inputs.tag_name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pre-release: ${{ inputs.prerelease }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "If any platform failed, check its job logs for details." >> "$GITHUB_STEP_SUMMARY"
