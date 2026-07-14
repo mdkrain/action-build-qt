@@ -211,14 +211,19 @@ build_autotools \
     "xcb-util-cursor-0.1.6"
 
 # === 10. libxkbcommon + libxkbcommon-x11 (meson) ============================
-# -Denable-x11=true builds libxkbcommon-x11 (depends on xcb).
-# -Denable-wayland=false: not needed here (Wayland uses its own protocol).
+# -Denable-x11=true  : builds libxkbcommon-x11 (depends on xcb).
+# -Denable-wayland=false / enable-tools=false / enable-xkbregistry=false:
+#   Qt only needs libxkbcommon + libxkbcommon-x11. Disabling tools and
+#   xkbregistry avoids pulling in libxml2/icu/lzma dependencies.
 build_meson \
     "https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-1.13.2.tar.gz" \
     "libxkbcommon-xkbcommon-1.13.2" \
     -Denable-docs=false \
     -Denable-x11=true \
-    -Denable-wayland=false
+    -Denable-wayland=false \
+    -Denable-tools=false \
+    -Denable-xkbregistry=false \
+    -Denable-bash-completion=false
 
 # === 11. libX11 + libX11-xcb (autotools) =====================================
 # libX11's source tree also builds libX11-xcb (the XGetXCBConnection shim).
