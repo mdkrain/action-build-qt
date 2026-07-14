@@ -52,14 +52,14 @@ foreach ($v in $requiredVars) {
     }
 }
 
-$qtVersion       = $env:QT_VERSION
-$urlTemplate     = $env:SUBMODULE_URL_TEMPLATE
-$moduleList      = ($env:SUBMODULES -split "," | Where-Object { $_ })
-$commonOpts      = $env:CMAKE_OPTIONS_COMMON
-$qtbaseOpts      = $env:CMAKE_OPTIONS_QTBASE
-$qtbasePlatform  = $env:CMAKE_OPTIONS_QTBASE_WINDOWS
-$stripDebug      = ($env:STRIP_DEBUG_SYMBOLS -eq "true")
-$parallelJobs    = [int]($env:PARALLEL_JOBS)
+$qtVersion = $env:QT_VERSION
+$urlTemplate = $env:SUBMODULE_URL_TEMPLATE
+$moduleList = ($env:SUBMODULES -split "," | Where-Object { $_ })
+$commonOpts = $env:CMAKE_OPTIONS_COMMON
+$qtbaseOpts = $env:CMAKE_OPTIONS_QTBASE
+$qtbasePlatform = $env:CMAKE_OPTIONS_QTBASE_WINDOWS
+$stripDebug = ($env:STRIP_DEBUG_SYMBOLS -eq "true")
+$parallelJobs = [int]($env:PARALLEL_JOBS)
 if ($parallelJobs -le 0) { $parallelJobs = $env:NUMBER_OF_PROCESSORS }
 
 if (-not $InstallPrefix) {
@@ -166,9 +166,17 @@ function Build-Submodule([string]$module) {
         if ($LASTEXITCODE -ne 0) { throw "7z tar extraction failed for $module" }
         Remove-Item $tarPath -Force
 
-        # Move inner directory contents to srcDir
+        # Move inner directory contents to srcDir.
+        # NOTE: srcDir MUST be created before the move loop. If it does not
+        # exist, Move-Item renames the FIRST child (e.g. the "cmake" dir) to
+        # srcDir instead of moving it inside, flattening the tree and dropping
+        # nested files like cmake/QtDeclarativeSetup.cmake. That file defines
+        # qt_declarative_generate_reg_exp_jit_tables, which qtbase auto-includes
+        # via include(QtDeclarativeSetup OPTIONAL); when missing, the configure
+        # fails later with "Unknown CMake command".
         $inner = Get-ChildItem -Path $extractTmp -Directory | Select-Object -First 1
         if ($inner) {
+            New-Item -ItemType Directory -Force -Path $srcDir | Out-Null
             Get-ChildItem -Path $inner.FullName -Force | ForEach-Object {
                 Move-Item -Path $_.FullName -Destination $srcDir -Force
             }
@@ -246,7 +254,7 @@ if ($env:OPENSSL_ROOT_DIR -and (Test-Path "$env:OPENSSL_ROOT_DIR\lib")) {
     New-Item -ItemType Directory -Force -Path $sslIncDir | Out-Null
 
     # Copy static libraries (.lib on MSVC, .a on GCC/Clang)
-    Get-ChildItem -Path "$env:OPENSSL_ROOT_DIR\lib" -Include *.lib,*.a -File -Recurse | ForEach-Object {
+    Get-ChildItem -Path "$env:OPENSSL_ROOT_DIR\lib" -Include *.lib, *.a -File -Recurse | ForEach-Object {
         Copy-Item $_.FullName -Destination $sslLibDir -Force
         Write-Host "  Copied: $($_.Name)"
     }
