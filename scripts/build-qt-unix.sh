@@ -11,8 +11,8 @@
 #   SUBMODULES                  Comma-separated list (in dependency order)
 #   CMAKE_OPTIONS_COMMON        CMake options for ALL modules
 #   CMAKE_OPTIONS_QTBASE        Extra CMake options for qtbase only
-#   CMAKE_OPTIONS_QTBASE_LINUX  Linux-specific qtbase options
-#   CMAKE_OPTIONS_QTBASE_MACOS  macOS-specific qtbase options
+#   CMAKE_OPTIONS_QTBASE_LINUX  Linux-specific options (all modules)
+#   CMAKE_OPTIONS_QTBASE_MACOS  macOS-specific options (all modules)
 #   STRIP_DEBUG_SYMBOLS         Strip debug symbols (true/false)
 #   PARALLEL_JOBS               Parallel job count (0 = auto)
 #   PACKAGE_NAME_TEMPLATE       Artifact package name template
@@ -195,10 +195,12 @@ build_submodule() {
             # shellcheck disable=SC2206
             cmake_args+=($CMAKE_OPTIONS_QTBASE)
         fi
-        if [[ -n "${QTBASE_PLATFORM_OPTS:-}" ]]; then
-            # shellcheck disable=SC2206
-            cmake_args+=($QTBASE_PLATFORM_OPTS)
-        fi
+    fi
+
+    # Platform-specific options (applies to ALL modules, not just qtbase)
+    if [[ -n "${QTBASE_PLATFORM_OPTS:-}" ]]; then
+        # shellcheck disable=SC2206
+        cmake_args+=($QTBASE_PLATFORM_OPTS)
     fi
 
     echo "CMake configure options:"

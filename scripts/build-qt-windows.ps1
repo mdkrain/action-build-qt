@@ -12,7 +12,7 @@
       SUBMODULES                    Comma-separated list (in dependency order)
       CMAKE_OPTIONS_COMMON          CMake options for ALL modules
       CMAKE_OPTIONS_QTBASE          Extra CMake options for qtbase only
-      CMAKE_OPTIONS_QTBASE_WINDOWS  Windows-specific qtbase options
+      CMAKE_OPTIONS_QTBASE_WINDOWS  Windows-specific options (all modules)
       STRIP_DEBUG_SYMBOLS           Strip debug symbols (true/false)
       PARALLEL_JOBS                 Parallel job count (0 = auto)
       PACKAGE_NAME_TEMPLATE         Artifact package name template
@@ -199,9 +199,11 @@ function Build-Submodule([string]$module) {
         if ($qtbaseOpts) {
             $cmakeArgs += ($qtbaseOpts -split ' ' | Where-Object { $_ })
         }
-        if ($qtbasePlatform) {
-            $cmakeArgs += ($qtbasePlatform -split ' ' | Where-Object { $_ })
-        }
+    }
+
+    # Platform-specific options (applies to ALL modules, not just qtbase)
+    if ($qtbasePlatform) {
+        $cmakeArgs += ($qtbasePlatform -split ' ' | Where-Object { $_ })
     }
 
     Write-Host "CMake configure options:"

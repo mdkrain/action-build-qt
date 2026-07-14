@@ -54,6 +54,7 @@ cmake_options_qtbase:
   # Disable unneeded features
   - "-DFEATURE_widgets=OFF"
   - "-DFEATURE_dbus=OFF"
+  - "-DFEATURE_sql=OFF"
   - "-DCMAKE_DISABLE_FIND_PACKAGE_LTTngUST=ON"
   # SSL: static OpenSSL on all platforms (built from source in workflow)
   # Qt .a files reference OpenSSL symbols (INPUT=linked), final executable
@@ -62,7 +63,7 @@ cmake_options_qtbase:
   - "-DFEATURE_openssl=ON"
   - "-DINPUT_openssl=linked"
 
-# ── Platform-specific CMake options (applied to qtbase only) ─────────────────
+# ── Platform-specific CMake options (applied to ALL modules, not just qtbase) ──
 cmake_options_qtbase_per_platform:
   windows:
     - "-DINPUT_freetype=qt"

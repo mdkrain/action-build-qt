@@ -289,7 +289,7 @@ jobs:
             - Static build (`BUILD_SHARED_LIBS=OFF`)
             - Size optimization (`FEATURE_optimize_size=ON`)
             - Reduced exports (`FEATURE_reduce_exports=ON`, Linux/macOS only)
-            - Disabled: Widgets, D-Bus
+            - Disabled: Widgets, D-Bus, SQL (avoids SQLite symbol conflict with vcpkg)
             - SSL: static OpenSSL 3.5.0 (built from source, all platforms)
             - Bundled: zlib, libpng, libjpeg, PCRE2, double-conversion, HarfBuzz, Freetype
 
