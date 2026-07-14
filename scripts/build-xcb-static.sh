@@ -37,7 +37,12 @@ die() {
 # === Configuration ============================================================
 PREFIX="${XCB_STATIC_PREFIX:-${RUNNER_WORKSPACE:-$HOME/qt-build-work}/xcb-static}"
 SRC_DIR="${RUNNER_WORKSPACE:-$HOME/qt-build-work}/xcb-src"
-NPROC="${PARALLEL_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+NPROC="${PARALLEL_JOBS:-0}"
+# 0 means auto-detect (same convention as build-qt-unix.sh).
+# make -j0 is invalid on GNU make, so resolve to actual CPU count.
+if [[ "$NPROC" -le 0 ]]; then
+    NPROC="$(nproc 2>/dev/null || echo 4)"
+fi
 
 mkdir -p "$PREFIX" "$SRC_DIR"
 
