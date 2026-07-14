@@ -87,10 +87,6 @@ cmake_options_qtbase_per_platform:
     # self-contained static build, so fontconfig is left to auto-detect OFF.
     # Qt falls back to scanning standard font dirs (/usr/share/fonts, etc).
     - "-DFEATURE_reduce_exports=ON"  # GCC/Clang only (NOT MSVC)
-    # Statically link C++ runtime (-static-libstdc++ -static-libgcc).
-    # Eliminates libstdc++.so.6 and libgcc_s.so.1 from final executable.
-    # glibc/libc/libm remain dynamic (static glibc is not portable).
-    - "-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc"
   macos:
     - "-DINPUT_freetype=qt"
     - "-DFEATURE_framework=OFF"
