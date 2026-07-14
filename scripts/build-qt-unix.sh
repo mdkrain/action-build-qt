@@ -180,9 +180,19 @@ build_submodule() {
     cmake_args+=("-S" "$src_dir" "-B" "$build_dir" "-G" "Ninja")
     cmake_args+=("-DCMAKE_INSTALL_PREFIX=$INSTALL_DIR")
 
-    # Modules after qtbase need to find the installed qtbase
+    # Modules after qtbase need to find the installed qtbase.
+    # On Linux, also include XCB_STATIC_PREFIX so CMake can find the static
+    # XCB/X11/xkbcommon libraries (pkg-config via PKG_CONFIG_PATH handles
+    # this too, but CMAKE_PREFIX_PATH is a fallback for find_library).
     if [[ "$module" != "qtbase" ]]; then
-        cmake_args+=("-DCMAKE_PREFIX_PATH=$INSTALL_DIR")
+        if [[ -n "${XCB_STATIC_PREFIX:-}" && -d "${XCB_STATIC_PREFIX:-}" ]]; then
+            cmake_args+=("-DCMAKE_PREFIX_PATH=$INSTALL_DIR;$XCB_STATIC_PREFIX")
+        else
+            cmake_args+=("-DCMAKE_PREFIX_PATH=$INSTALL_DIR")
+        fi
+    elif [[ -n "${XCB_STATIC_PREFIX:-}" && -d "${XCB_STATIC_PREFIX:-}" ]]; then
+        # qtbase: only pass XCB prefix (qtbase isn't installed yet).
+        cmake_args+=("-DCMAKE_PREFIX_PATH=$XCB_STATIC_PREFIX")
     fi
 
     # Common options
@@ -254,6 +264,54 @@ if [[ -n "${OPENSSL_ROOT_DIR:-}" && -d "${OPENSSL_ROOT_DIR}/lib" ]]; then
     fi
 
     echo "OpenSSL static libraries and headers copied to $INSTALL_DIR"
+fi
+
+# === Copy static XCB stack into Qt prefix (Linux only) ========================
+# When XCB_STATIC_PREFIX is set (Linux), copy the static XCB/X11/xkbcommon
+# .a files, headers, and patched .pc files into the Qt install directory.
+# This makes the Qt package self-contained: RainBook only needs
+# CMAKE_PREFIX_PATH=<Qt install dir> to find everything.
+# The .pc files have their prefix= line rewritten to the Qt install dir
+# so pkg-config returns correct paths at RainBook build time.
+if [[ -n "${XCB_STATIC_PREFIX:-}" && -d "${XCB_STATIC_PREFIX}/lib" ]]; then
+    log_step "Copy static XCB stack into Qt prefix"
+    echo "XCB_STATIC_PREFIX=$XCB_STATIC_PREFIX"
+
+    mkdir -p "$INSTALL_DIR/lib" "$INSTALL_DIR/include" "$INSTALL_DIR/lib/pkgconfig"
+
+    # Copy static libraries (.a files)
+    xcb_lib_count=0
+    for lib in "$XCB_STATIC_PREFIX/lib/"*.a; do
+        [[ -f "$lib" ]] && cp -a "$lib" "$INSTALL_DIR/lib/" && xcb_lib_count=$((xcb_lib_count + 1))
+    done
+    echo "Copied $xcb_lib_count static XCB/X11/xkbcommon libraries"
+
+    # Copy headers (X11/, xcb/, xkbcommon/)
+    for inc_dir in "$XCB_STATIC_PREFIX/include/"*/; do
+        [[ -d "$inc_dir" ]] && cp -a "$inc_dir" "$INSTALL_DIR/include/"
+    done
+
+    # Copy and patch pkg-config files:
+    # 1. Rewrite prefix= to Qt install dir (updates libdir, includedir via
+    #    ${prefix} expansion).
+    # 2. Merge Requires.private -> Requires and Libs.private -> Libs.
+    #    This lets downstream projects (RainBook) use plain `pkg-config --libs`
+    #    without needing `--static` — all transitive deps (Xau, Xdmcp, etc.)
+    #    are returned automatically. pkg-config concatenates duplicate fields.
+    pc_count=0
+    for pc in "$XCB_STATIC_PREFIX/lib/pkgconfig/"*.pc; do
+        [[ -f "$pc" ]] || continue
+        pc_basename="$(basename "$pc")"
+        sed \
+            -e "s|^prefix=.*|prefix=$INSTALL_DIR|" \
+            -e 's|^Requires\.private:|Requires:|' \
+            -e 's|^Libs\.private:|Libs:|' \
+            "$pc" > "$INSTALL_DIR/lib/pkgconfig/$pc_basename"
+        pc_count=$((pc_count + 1))
+    done
+    echo "Copied and patched $pc_count pkg-config files"
+
+    echo "Static XCB stack copied to $INSTALL_DIR"
 fi
 
 # === Strip debug symbols (optional) ==========================================

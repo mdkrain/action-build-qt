@@ -87,6 +87,7 @@ jobs:
 
       # ── 4. 安装平台依赖 ────────────────────────────────────────────────────
       # Linux 需要 XCB / Wayland / fontconfig / freetype 等开发包用于 Qt 平台插件。
+      # 额外安装 autotools + meson 用于从源码构建静态 XCB/X11/xkbcommon 栈。
       - name: Install Linux dependencies
         if: matrix.platform == 'linux'
         shell: bash
@@ -94,14 +95,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build python3 perl pkg-config flex bison gperf \
+            autoconf automake libtool libtool-bin xutils-dev meson \
             libgl1-mesa-dev libglu1-mesa-dev \
             libfontconfig1-dev libfreetype6-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev \
-            libxcb1-dev libx11-xcb-dev libxcb-glx0-dev \
-            libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev \
-            libxcb-randr0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev \
-            libxcb-sync-dev libxcb-util-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
-            libxcb-xkb-dev libxcb-cursor-dev \
+            xcb-proto x11proto-dev xtrans-dev libpthread-stubs0-dev \
             libwayland-dev libwayland-egl1-mesa libgles2-mesa-dev
 
       # macOS runner has Xcode CLT, cmake, ninja, perl. No extra deps needed.
@@ -202,6 +199,42 @@ jobs:
         shell: bash
         run: echo "OPENSSL_ROOT_DIR=${RUNNER_WORKSPACE}/openssl-static" >> "$GITHUB_ENV"
 
+      # ── 4c. Build static XCB stack (Linux only) ─────────────────────────────
+      # Builds libXau, libXdmcp, libxcb + all extensions, xcb-util-* family,
+      # libxkbcommon + libxkbcommon-x11, libX11 + libX11-xcb as static-only
+      # .a files. Eliminates ~15 dynamic deps from the final executable.
+      # OpenGL (libGL/libEGL) and glibc remain dynamic by design.
+      - name: Cache static XCB stack
+        if: matrix.platform == 'linux'
+        id: cache-xcb
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.workspace }}/xcb-static
+          key: xcb-static-v1-${{ matrix.platform }}
+
+      - name: Build static XCB stack (Linux)
+        if: matrix.platform == 'linux' && steps.cache-xcb.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          chmod +x scripts/build-xcb-static.sh
+          XCB_STATIC_PREFIX="${RUNNER_WORKSPACE}/xcb-static" \
+          RUNNER_WORKSPACE="${RUNNER_WORKSPACE}" \
+          bash scripts/build-xcb-static.sh
+
+      - name: Export static XCB paths (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          # Make static XCB visible to Qt's CMake via pkg-config and CMAKE_PREFIX_PATH.
+          # PKG_CONFIG="pkg-config --static" makes .pc files include Libs.private
+          # (transitive deps like Xau, Xdmcp) so the linker pulls in everything.
+          echo "XCB_STATIC_PREFIX=${RUNNER_WORKSPACE}/xcb-static" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=${RUNNER_WORKSPACE}/xcb-static/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG=pkg-config --static" >> "$GITHUB_ENV"
+          # Also expose via CMAKE_PREFIX_PATH so find_library() can locate .a files
+          # directly (not just via pkg-config).
+          echo "CMAKE_PREFIX_PATH=${RUNNER_WORKSPACE}/xcb-static${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" >> "$GITHUB_ENV"
+
       # ── 5. 缓存 Qt 源码（按 Qt 版本 + 平台作为 key）──────────────────────────
       # 失败重跑或修改配置时可跳过重新下载/解压源码。源码与 CMake 选项无关，
       # 因此 key 不含 config hash。缓存各子模块的源码目录和压缩包。
@@ -235,6 +268,10 @@ jobs:
         env:
           RUNNER_WORKSPACE: ${{ runner.workspace }}
           OPENSSL_ROOT_DIR: ${{ env.OPENSSL_ROOT_DIR }}
+          # Linux: static XCB prefix (set by "Export static XCB paths" step).
+          # Empty on macOS (no XCB). PKG_CONFIG_PATH / PKG_CONFIG / CMAKE_PREFIX_PATH
+          # are also set in GITHUB_ENV and inherited automatically.
+          XCB_STATIC_PREFIX: ${{ env.XCB_STATIC_PREFIX }}
         run: |
           chmod +x scripts/build-qt-unix.sh
           bash scripts/build-qt-unix.sh
@@ -291,9 +328,13 @@ jobs:
             - Size optimization (`FEATURE_optimize_size=ON`)
             - Reduced exports (`FEATURE_reduce_exports=ON`, Linux/macOS only)
             - Disabled: Widgets, D-Bus, SQL (avoids SQLite symbol conflict with vcpkg)
+            - Disabled: ICU, Brotli, Zstd (eliminates dynamic deps)
             - SSL: static OpenSSL 3.5.0 (built from source, all platforms)
             - Bundled: zlib, libpng, libjpeg, PCRE2, double-conversion, HarfBuzz, Freetype
             - Linux: XCB + Wayland platform backends
+            - Linux: static XCB/X11/xkbcommon stack (built from source, ~15 libs)
+            - Linux: static libstdc++/libgcc (`-static-libstdc++ -static-libgcc`)
+            - Remaining dynamic deps: glibc (libc/libm/ld-linux), OpenGL (libGL/libEGL)
 
             ## Usage
             Download the package for your platform, extract it, and set the path
