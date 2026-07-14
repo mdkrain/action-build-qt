@@ -87,14 +87,16 @@ cmake_options_qtbase_per_platform:
     # self-contained static build, so fontconfig is left to auto-detect OFF.
     # Qt falls back to scanning standard font dirs (/usr/share/fonts, etc).
     - "-DFEATURE_reduce_exports=ON"  # GCC/Clang only (NOT MSVC)
-    # Qt's compile tests (e.g. TEST_xcb_syslibs) use check_cxx_source_compiles
-    # which links a test executable. With static XCB libraries, the link fails
-    # because ECM's FindXCB.cmake creates IMPORTED targets without complete
-    # transitive dependency info (Xau, Xdmcp, X11, etc.). STATIC_LIBRARY tells
-    # CMake to compile but NOT link during try_compile — the test only verifies
-    # that headers are found and code compiles. Safe because we verify all XCB
-    # components via pkg-config in the "Verify XCB components" workflow step.
-    - "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"
+    # Bypass Qt's TEST_xcb_syslibs compile test. The test uses
+    # check_cxx_source_compiles which links a test executable against 14 XCB::*
+    # IMPORTED targets. With static XCB libraries, the link fails because ECM's
+    # FindXCB.cmake doesn't propagate transitive deps (Xau, Xdmcp, X11, etc.).
+    # Pre-defining TEST_xcb_syslibs=TRUE makes qt_run_config_compile_test()
+    # return early (DEFINED check), skipping the broken link test. We verify all
+    # 14 XCB components via pkg-config in the "Verify XCB components" step.
+    # NOTE: Do NOT use CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY globally —
+    # it breaks CMake's FindOpenGL GLVND detection (which uses try_compile).
+    - "-DTEST_xcb_syslibs=TRUE"
   macos:
     - "-DINPUT_freetype=qt"
     - "-DFEATURE_framework=OFF"
