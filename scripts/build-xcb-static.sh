@@ -142,6 +142,13 @@ build_meson() {
     ninja -C build install
 }
 
+# === 0. xcb-proto (no deps, needed by libxcb >= 1.17) ========================
+# Ubuntu 24.04 only ships xcb-proto 1.16.0, but libxcb 1.17.0 requires >= 1.17.0.
+# xcb-proto is just XML files + a Python module (xcbgen), no compilation.
+build_autotools \
+    "https://xorg.freedesktop.org/archive/individual/proto/xcb-proto-1.17.0.tar.xz" \
+    "xcb-proto-1.17.0"
+
 # === 1. libXau (no deps) =====================================================
 build_autotools \
     "https://xorg.freedesktop.org/archive/individual/lib/libXau-1.0.11.tar.xz" \
