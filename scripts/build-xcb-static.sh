@@ -165,47 +165,47 @@ build_autotools \
 # All extensions (randr, render, shm, sync, xfixes, shape, xkb, xinput,
 # xinerama, glx, present, etc.) are built by default in libxcb 1.17+.
 build_autotools \
-    "https://xorg.freedesktop.org/archive/individual/lib/libxcb-1.17.0.tar.xz" \
+    "https://xorg.freedesktop.org/archive/individual/xcb/libxcb-1.17.0.tar.xz" \
     "libxcb-1.17.0" \
     --enable-xinput=yes \
     --enable-xkb=yes
 
 # === 4. xcb-util (base utility lib) ==========================================
 build_autotools \
-    "https://xorg.freedesktop.org/archive/individual/lib/xcb-util-0.4.1.tar.xz" \
+    "https://xorg.freedesktop.org/archive/individual/xcb/xcb-util-0.4.1.tar.xz" \
     "xcb-util-0.4.1"
 
 # === 5. xcb-util-wm (ICCCM, EWMH) ============================================
 build_autotools \
-    "https://xorg.freedesktop.org/archive/individual/lib/xcb-util-wm-0.4.2.tar.xz" \
+    "https://xorg.freedesktop.org/archive/individual/xcb/xcb-util-wm-0.4.2.tar.xz" \
     "xcb-util-wm-0.4.2"
 
 # === 6. xcb-util-image =======================================================
 build_autotools \
-    "https://xorg.freedesktop.org/archive/individual/lib/xcb-util-image-0.4.1.tar.xz" \
+    "https://xorg.freedesktop.org/archive/individual/xcb/xcb-util-image-0.4.1.tar.xz" \
     "xcb-util-image-0.4.1"
 
 # === 7. xcb-util-keysyms =====================================================
 build_autotools \
-    "https://xorg.freedesktop.org/archive/individual/lib/xcb-util-keysyms-0.4.1.tar.xz" \
+    "https://xorg.freedesktop.org/archive/individual/xcb/xcb-util-keysyms-0.4.1.tar.xz" \
     "xcb-util-keysyms-0.4.1"
 
 # === 8. xcb-util-renderutil ==================================================
 build_autotools \
-    "https://xorg.freedesktop.org/archive/individual/lib/xcb-util-renderutil-0.3.10.tar.xz" \
+    "https://xorg.freedesktop.org/archive/individual/xcb/xcb-util-renderutil-0.3.10.tar.xz" \
     "xcb-util-renderutil-0.3.10"
 
 # === 9. xcb-util-cursor (depends on renderutil + image) ======================
 build_autotools \
-    "https://xorg.freedesktop.org/archive/individual/lib/xcb-util-cursor-0.1.5.tar.xz" \
-    "xcb-util-cursor-0.1.5"
+    "https://xorg.freedesktop.org/archive/individual/xcb/xcb-util-cursor-0.1.6.tar.xz" \
+    "xcb-util-cursor-0.1.6"
 
 # === 10. libxkbcommon + libxkbcommon-x11 (meson) ============================
 # -Denable-x11=true builds libxkbcommon-x11 (depends on xcb).
 # -Denable-wayland=false: not needed here (Wayland uses its own protocol).
 build_meson \
-    "https://xkbcommon.org/download/libxkbcommon-1.7.2.tar.xz" \
-    "libxkbcommon-1.7.2" \
+    "https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-1.13.2.tar.gz" \
+    "libxkbcommon-xkbcommon-1.13.2" \
     -Denable-docs=false \
     -Denable-x11=true \
     -Denable-wayland=false
@@ -214,8 +214,8 @@ build_meson \
 # libX11's source tree also builds libX11-xcb (the XGetXCBConnection shim).
 # --without-xmlto / --disable-specs: avoid XML doc build tools.
 build_autotools \
-    "https://xorg.freedesktop.org/archive/individual/lib/libX11-1.8.10.tar.xz" \
-    "libX11-1.8.10" \
+    "https://xorg.freedesktop.org/archive/individual/lib/libX11-1.8.12.tar.xz" \
+    "libX11-1.8.12" \
     --disable-specs \
     --without-xmlto \
     --without-fop \
