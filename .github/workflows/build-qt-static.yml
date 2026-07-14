@@ -229,7 +229,7 @@ jobs:
           # PKG_CONFIG="pkg-config --static" makes .pc files include Libs.private
           # (transitive deps like Xau, Xdmcp) so the linker pulls in everything.
           echo "XCB_STATIC_PREFIX=${RUNNER_WORKSPACE}/xcb-static" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=${RUNNER_WORKSPACE}/xcb-static/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=${RUNNER_WORKSPACE}/xcb-static/lib/pkgconfig:${RUNNER_WORKSPACE}/xcb-static/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
           echo "PKG_CONFIG=pkg-config --static" >> "$GITHUB_ENV"
           # Also expose via CMAKE_PREFIX_PATH so find_library() can locate .a files
           # directly (not just via pkg-config).

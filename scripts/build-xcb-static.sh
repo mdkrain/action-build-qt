@@ -47,8 +47,10 @@ fi
 mkdir -p "$PREFIX" "$SRC_DIR"
 
 # Make our prefix visible to pkg-config for all subsequent builds.
-# System pkg-config paths are still searched (for xcb-proto, etc.).
-export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+# Include BOTH lib/pkgconfig (arch-specific: libxcb, libX11, etc.) and
+# share/pkgconfig (arch-independent: xcb-proto, xproto, etc.).
+# System pkg-config paths are still searched after our prefix.
+export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 # Use --static so .pc files return Libs.private (transitive deps).
 export PKG_CONFIG="pkg-config --static"
 

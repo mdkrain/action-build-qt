@@ -291,7 +291,8 @@ if [[ -n "${XCB_STATIC_PREFIX:-}" && -d "${XCB_STATIC_PREFIX}/lib" ]]; then
         [[ -d "$inc_dir" ]] && cp -a "$inc_dir" "$INSTALL_DIR/include/"
     done
 
-    # Copy and patch pkg-config files:
+    # Copy and patch pkg-config files from BOTH lib/pkgconfig (arch-specific)
+    # and share/pkgconfig (arch-independent: xcb-proto, xproto, etc.).
     # 1. Rewrite prefix= to Qt install dir (updates libdir, includedir via
     #    ${prefix} expansion).
     # 2. Merge Requires.private -> Requires and Libs.private -> Libs.
@@ -299,15 +300,18 @@ if [[ -n "${XCB_STATIC_PREFIX:-}" && -d "${XCB_STATIC_PREFIX}/lib" ]]; then
     #    without needing `--static` — all transitive deps (Xau, Xdmcp, etc.)
     #    are returned automatically. pkg-config concatenates duplicate fields.
     pc_count=0
-    for pc in "$XCB_STATIC_PREFIX/lib/pkgconfig/"*.pc; do
-        [[ -f "$pc" ]] || continue
-        pc_basename="$(basename "$pc")"
-        sed \
-            -e "s|^prefix=.*|prefix=$INSTALL_DIR|" \
-            -e 's|^Requires\.private:|Requires:|' \
-            -e 's|^Libs\.private:|Libs:|' \
-            "$pc" > "$INSTALL_DIR/lib/pkgconfig/$pc_basename"
-        pc_count=$((pc_count + 1))
+    for pc_dir in "$XCB_STATIC_PREFIX/lib/pkgconfig" "$XCB_STATIC_PREFIX/share/pkgconfig"; do
+        [[ -d "$pc_dir" ]] || continue
+        for pc in "$pc_dir/"*.pc; do
+            [[ -f "$pc" ]] || continue
+            pc_basename="$(basename "$pc")"
+            sed \
+                -e "s|^prefix=.*|prefix=$INSTALL_DIR|" \
+                -e 's|^Requires\.private:|Requires:|' \
+                -e 's|^Libs\.private:|Libs:|' \
+                "$pc" > "$INSTALL_DIR/lib/pkgconfig/$pc_basename"
+            pc_count=$((pc_count + 1))
+        done
     done
     echo "Copied and patched $pc_count pkg-config files"
 
