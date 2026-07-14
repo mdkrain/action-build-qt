@@ -95,7 +95,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build python3 perl pkg-config flex bison gperf \
-            autoconf automake libtool libtool-bin xutils-dev meson \
+            autoconf automake libtool libtool-bin xutils-dev meson python3-pip \
             libgl1-mesa-dev libglu1-mesa-dev \
             libfontconfig1-dev libfreetype6-dev \
             xcb-proto x11proto-dev xtrans-dev libpthread-stubs0-dev \

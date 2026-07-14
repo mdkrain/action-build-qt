@@ -71,6 +71,16 @@ for tool in autoconf automake libtoolize meson ninja; do
     command -v "$tool" >/dev/null 2>&1 || die "Required tool not in PATH: $tool"
 done
 
+# libxkbcommon 1.13.2 requires meson >= 1.4.0; Ubuntu 24.04 only ships 1.3.2.
+# Upgrade via pip if the system meson is too old.
+if ! dpkg --compare-versions "$(meson --version 2>/dev/null || echo 0)" ge 1.4.0; then
+    echo "System meson is $(meson --version 2>/dev/null || echo 'missing'); upgrading to >= 1.4.0"
+    command -v pip3 >/dev/null 2>&1 || die "pip3 not found (apt install python3-pip)"
+    pip3 install --user --break-system-packages 'meson>=1.4.0'
+    export PATH="$HOME/.local/bin:$PATH"
+    echo "Upgraded meson to $(meson --version)"
+fi
+
 # xcb-proto provides the Python module xcbgen and XML descriptions needed
 # by libxcb's configure. On Debian/Ubuntu it is installed via xcb-proto.
 pkg-config --exists xcb-proto || die "xcb-proto not found (apt install xcb-proto)"
