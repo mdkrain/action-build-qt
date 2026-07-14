@@ -216,43 +216,6 @@ build_submodule() {
     echo "CMake configure options:"
     printf '  %s\n' "${cmake_args[@]}"
 
-    # --- Diagnostic: XCB component target check (qtbase on Linux) ---
-    # TEST_xcb_syslinks is skipped (empty result) when ANY of the 14 XCB::*
-    # imported targets is missing. Use Qt's own ECM FindXCB.cmake to identify
-    # exactly which component fails to be found.
-    if [[ "$module" == "qtbase" && "$PLATFORM" == "linux" ]]; then
-        log_step "Diagnostic: XCB component target check"
-        diag_dir="$WORK_DIR/xcb-diag"
-        rm -rf "$diag_dir" "$diag_dir-build"
-        mkdir -p "$diag_dir"
-        cat > "$diag_dir/CMakeLists.txt" <<'EOF_DIAG'
-cmake_minimum_required(VERSION 3.16)
-project(xcb_diag LANGUAGES C CXX)
-find_package(PkgConfig REQUIRED)
-set(components XCB CURSOR ICCCM UTIL IMAGE KEYSYMS RENDERUTIL
-              RANDR RENDER SHAPE SHM SYNC XFIXES XKB)
-foreach(comp ${components})
-    find_package(XCB MODULE COMPONENTS ${comp})
-    if(TARGET XCB::${comp})
-        message(STATUS "XCB_DIAG FOUND:    XCB::${comp}")
-    else()
-        message(STATUS "XCB_DIAG MISSING:  XCB::${comp}")
-        message(STATUS "XCB_DIAG   XCB_${comp}_FOUND=${XCB_${comp}_FOUND}")
-        message(STATUS "XCB_DIAG   XCB_${comp}_LIBRARY=${XCB_${comp}_LIBRARY}")
-        message(STATUS "XCB_DIAG   XCB_${comp}_INCLUDE_DIR=${XCB_${comp}_INCLUDE_DIR}")
-    endif()
-endforeach()
-message(STATUS "XCB_DIAG PKG_CONFIG_PATH=$ENV{PKG_CONFIG_PATH}")
-message(STATUS "XCB_DIAG CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}")
-EOF_DIAG
-        cmake -S "$diag_dir" -B "$diag_dir-build" \
-            -DCMAKE_MODULE_PATH="$src_dir/cmake/3rdparty/extra-cmake-modules/find-modules" \
-            -DCMAKE_PREFIX_PATH="${XCB_STATIC_PREFIX:-}" \
-            -G "Ninja" \
-            2>&1 || true
-        echo "--- End XCB diagnostic ---"
-    fi
-
     cmake "${cmake_args[@]}"
 
     # --- Build ---

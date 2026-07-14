@@ -87,6 +87,14 @@ cmake_options_qtbase_per_platform:
     # self-contained static build, so fontconfig is left to auto-detect OFF.
     # Qt falls back to scanning standard font dirs (/usr/share/fonts, etc).
     - "-DFEATURE_reduce_exports=ON"  # GCC/Clang only (NOT MSVC)
+    # Qt's compile tests (e.g. TEST_xcb_syslibs) use check_cxx_source_compiles
+    # which links a test executable. With static XCB libraries, the link fails
+    # because ECM's FindXCB.cmake creates IMPORTED targets without complete
+    # transitive dependency info (Xau, Xdmcp, X11, etc.). STATIC_LIBRARY tells
+    # CMake to compile but NOT link during try_compile — the test only verifies
+    # that headers are found and code compiles. Safe because we verify all XCB
+    # components via pkg-config in the "Verify XCB components" workflow step.
+    - "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"
   macos:
     - "-DINPUT_freetype=qt"
     - "-DFEATURE_framework=OFF"
