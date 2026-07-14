@@ -236,6 +236,26 @@ build_autotools \
     --without-fop \
     --without-xsltproc
 
+# === Patch .pc files for static linking ======================================
+# Merge Requires.private -> Requires and Libs.private -> Libs so that
+# downstream consumers (Qt's CMake) get full transitive dependency flags
+# via plain `pkg-config --libs` without needing --static. pkg-config
+# concatenates duplicate fields, so this is safe.
+log_step "Patching .pc files for static linking"
+pc_patched=0
+for pc_dir in "$PREFIX/lib/pkgconfig" "$PREFIX/share/pkgconfig"; do
+    [[ -d "$pc_dir" ]] || continue
+    for pc in "$pc_dir/"*.pc; do
+        [[ -f "$pc" ]] || continue
+        sed -i \
+            -e 's|^Requires\.private:|Requires:|' \
+            -e 's|^Libs\.private:|Libs:|' \
+            "$pc"
+        pc_patched=$((pc_patched + 1))
+    done
+done
+echo "Patched $pc_patched .pc files"
+
 # === Verify output ============================================================
 log_step "Static XCB stack build complete"
 echo "Installed .a files:"
@@ -244,10 +264,13 @@ echo ""
 echo "Installed .pc files:"
 ls -1 "$PREFIX/lib/pkgconfig/"*.pc 2>/dev/null | sed 's|.*/|  |'
 echo ""
+echo "Verify pkg-config --libs xcb (no --static, should include transitive deps):"
+pkg-config --libs xcb
+echo ""
 echo "Verify pkg-config --static --libs xcb:"
 pkg-config --static --libs xcb
 echo ""
-echo "Verify pkg-config --static --libs xkbcommon-x11:"
-pkg-config --static --libs xkbcommon-x11
+echo "Verify pkg-config --libs xkbcommon-x11:"
+pkg-config --libs xkbcommon-x11
 echo ""
 echo "Prefix: $PREFIX"

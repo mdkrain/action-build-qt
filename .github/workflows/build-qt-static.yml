@@ -210,7 +210,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.workspace }}/xcb-static
-          key: xcb-static-v1-${{ matrix.platform }}
+          key: xcb-static-v2-${{ matrix.platform }}
 
       - name: Build static XCB stack (Linux)
         if: matrix.platform == 'linux' && steps.cache-xcb.outputs.cache-hit != 'true'
@@ -226,11 +226,13 @@ jobs:
         shell: bash
         run: |
           # Make static XCB visible to Qt's CMake via pkg-config and CMAKE_PREFIX_PATH.
-          # PKG_CONFIG="pkg-config --static" makes .pc files include Libs.private
-          # (transitive deps like Xau, Xdmcp) so the linker pulls in everything.
+          # The .pc files in xcb-static are already patched (Libs.private merged
+          # into Libs by build-xcb-static.sh), so plain `pkg-config --libs` returns
+          # full transitive deps. Do NOT set PKG_CONFIG=--static globally: it would
+          # also affect system libraries (wayland, libdrm, etc.) and may pull in
+          # Libs.private from .pc files whose static versions are unavailable.
           echo "XCB_STATIC_PREFIX=${RUNNER_WORKSPACE}/xcb-static" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=${RUNNER_WORKSPACE}/xcb-static/lib/pkgconfig:${RUNNER_WORKSPACE}/xcb-static/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG=pkg-config --static" >> "$GITHUB_ENV"
           # Also expose via CMAKE_PREFIX_PATH so find_library() can locate .a files
           # directly (not just via pkg-config).
           echo "CMAKE_PREFIX_PATH=${RUNNER_WORKSPACE}/xcb-static${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" >> "$GITHUB_ENV"
