@@ -73,6 +73,8 @@ cmake_options_qtbase_per_platform:
     - "-DFEATURE_xcb=ON"
     - "-DINPUT_xcb=yes"
     - "-DINPUT_bundled_xcb_xinput=yes"
+    # Wayland support: enable both XCB (X11) and Wayland backends
+    - "-DFEATURE_wayland=ON"
     # NOTE: FEATURE_fontconfig requires INPUT_freetype=system (fontconfig
     # links against system libfreetype). We use bundled freetype for a fully
     # self-contained static build, so fontconfig is left to auto-detect OFF.

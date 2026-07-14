@@ -86,7 +86,7 @@ jobs:
           cat "$GITHUB_ENV" | grep -E '^(QT_VERSION|SUBMODULES|CMAKE_OPTIONS_)=' || true
 
       # ── 4. 安装平台依赖 ────────────────────────────────────────────────────
-      # Linux 需要 XCB / fontconfig / freetype 等开发包用于 Qt 平台插件。
+      # Linux 需要 XCB / Wayland / fontconfig / freetype 等开发包用于 Qt 平台插件。
       - name: Install Linux dependencies
         if: matrix.platform == 'linux'
         shell: bash
@@ -101,7 +101,8 @@ jobs:
             libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev \
             libxcb-randr0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev \
             libxcb-sync-dev libxcb-util-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
-            libxcb-xkb-dev libxcb-cursor-dev
+            libxcb-xkb-dev libxcb-cursor-dev \
+            libwayland-dev libwayland-egl1-mesa libgles2-mesa-dev
 
       # macOS runner has Xcode CLT, cmake, ninja, perl. No extra deps needed.
 
@@ -282,7 +283,7 @@ jobs:
 
             ## Platforms
             - **Windows**: MSVC static CRT (/MT), x86_64
-            - **Linux**: GCC + XCB, x86_64
+            - **Linux**: GCC + XCB + Wayland, x86_64
             - **macOS**: Clang, arm64 (Apple Silicon)
 
             ## Build options (vcpkg-style per-module CMake builds)
@@ -292,6 +293,7 @@ jobs:
             - Disabled: Widgets, D-Bus, SQL (avoids SQLite symbol conflict with vcpkg)
             - SSL: static OpenSSL 3.5.0 (built from source, all platforms)
             - Bundled: zlib, libpng, libjpeg, PCRE2, double-conversion, HarfBuzz, Freetype
+            - Linux: XCB + Wayland platform backends
 
             ## Usage
             Download the package for your platform, extract it, and set the path
