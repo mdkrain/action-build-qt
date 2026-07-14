@@ -257,20 +257,65 @@ done
 echo "Patched $pc_patched .pc files"
 
 # === Verify output ============================================================
-log_step "Static XCB stack build complete"
-echo "Installed .a files:"
-ls -1 "$PREFIX/lib/"*.a 2>/dev/null | sed 's|.*/|  |'
+# Qt's TEST_xcb_syslibs configure test links against these 14 XCB components.
+# If ANY .pc file is missing or broken, the test fails with an empty result.
+# Verify each one explicitly so we catch issues here rather than in Qt's CMake.
+log_step "Verifying all 14 XCB components required by Qt"
+REQUIRED_XCB_COMPONENTS=(
+    xcb
+    xcb-randr
+    xcb-render
+    xcb-renderutil
+    xcb-shape
+    xcb-shm
+    xcb-sync
+    xcb-xfixes
+    xcb-xkb
+    xcb-icccm
+    xcb-util
+    xcb-image
+    xcb-keysyms
+    xcb-cursor
+)
+
+verify_failed=0
+for comp in "${REQUIRED_XCB_COMPONENTS[@]}"; do
+    if ! pkg-config --exists "$comp"; then
+        echo "  MISSING: pkg-config module '$comp' not found"
+        verify_failed=1
+        continue
+    fi
+    version="$(pkg-config --modversion "$comp")"
+    libs="$(pkg-config --libs "$comp" 2>&1)"
+    if [[ $? -ne 0 ]]; then
+        echo "  ERROR:   '$comp' (v$version) -- pkg-config --libs failed: $libs"
+        verify_failed=1
+    else
+        echo "  OK:      '$comp' v$version -> $libs"
+    fi
+done
+
+if [[ "$verify_failed" -ne 0 ]]; then
+    echo ""
+    echo "=== Installed .a files ==="
+    ls -1 "$PREFIX/lib/"*.a 2>/dev/null | sed 's|.*/|  |'
+    echo ""
+    echo "=== Installed .pc files (lib/pkgconfig) ==="
+    ls -1 "$PREFIX/lib/pkgconfig/"*.pc 2>/dev/null | sed 's|.*/|  |'
+    echo ""
+    echo "=== Installed .pc files (share/pkgconfig) ==="
+    ls -1 "$PREFIX/share/pkgconfig/"*.pc 2>/dev/null | sed 's|.*/|  |'
+    die "One or more required XCB components failed verification"
+fi
+
 echo ""
-echo "Installed .pc files:"
-ls -1 "$PREFIX/lib/pkgconfig/"*.pc 2>/dev/null | sed 's|.*/|  |'
-echo ""
-echo "Verify pkg-config --libs xcb (no --static, should include transitive deps):"
-pkg-config --libs xcb
-echo ""
-echo "Verify pkg-config --static --libs xcb:"
-pkg-config --static --libs xcb
-echo ""
-echo "Verify pkg-config --libs xkbcommon-x11:"
-pkg-config --libs xkbcommon-x11
+echo "All 14 XCB components verified successfully."
+
+# Also verify xkbcommon-x11 (needed by QT_FEATURE_xkbcommon_x11)
+if ! pkg-config --exists xkbcommon-x11; then
+    die "xkbcommon-x11 not found"
+fi
+echo "xkbcommon-x11: $(pkg-config --modversion xkbcommon-x11) -> $(pkg-config --libs xkbcommon-x11)"
+
 echo ""
 echo "Prefix: $PREFIX"

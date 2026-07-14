@@ -210,7 +210,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.workspace }}/xcb-static
-          key: xcb-static-v2-${{ matrix.platform }}
+          key: xcb-static-v3-${{ matrix.platform }}
 
       - name: Build static XCB stack (Linux)
         if: matrix.platform == 'linux' && steps.cache-xcb.outputs.cache-hit != 'true'
@@ -236,6 +236,47 @@ jobs:
           # Also expose via CMAKE_PREFIX_PATH so find_library() can locate .a files
           # directly (not just via pkg-config).
           echo "CMAKE_PREFIX_PATH=${RUNNER_WORKSPACE}/xcb-static${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" >> "$GITHUB_ENV"
+
+      - name: Verify XCB components (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          # Verify that all 14 XCB components required by Qt's TEST_xcb_syslibs
+          # are findable via pkg-config (without --static, since .pc files are
+          # already patched). This catches stale cache / incomplete builds.
+          echo "=== Installed .pc files ==="
+          ls -1 "${RUNNER_WORKSPACE}/xcb-static/lib/pkgconfig/"*.pc 2>/dev/null | sed 's|.*/|  |'
+          ls -1 "${RUNNER_WORKSPACE}/xcb-static/share/pkgconfig/"*.pc 2>/dev/null | sed 's|.*/|  |'
+          echo ""
+          echo "=== Installed .a files ==="
+          ls -1 "${RUNNER_WORKSPACE}/xcb-static/lib/"*.a 2>/dev/null | sed 's|.*/|  |'
+          echo ""
+          echo "=== pkg-config check for each required component ==="
+          missing=0
+          for comp in \
+              xcb xcb-randr xcb-render xcb-renderutil xcb-shape xcb-shm \
+              xcb-sync xcb-xfixes xcb-xkb xcb-icccm xcb-util xcb-image \
+              xcb-keysyms xcb-cursor xkbcommon xkbcommon-x11; do
+              if pkg-config --exists "$comp"; then
+                  echo "  OK:  $comp v$(pkg-config --modversion $comp) -> $(pkg-config --libs $comp)"
+              else
+                  echo "  MISSING: $comp"
+                  missing=1
+              fi
+          done
+          echo ""
+          echo "=== PKG_CONFIG_PATH ==="
+          echo "$PKG_CONFIG_PATH"
+          echo ""
+          echo "=== PKG_CONFIG env var ==="
+          echo "PKG_CONFIG=${PKG_CONFIG:-(not set)}"
+          if [[ "$missing" -ne 0 ]]; then
+              echo ""
+              echo "ERROR: One or more XCB components are missing."
+              echo "The cache may be stale (from a previous failed build)."
+              echo "To fix: bump the cache key in the workflow file."
+              exit 1
+          fi
 
       # ── 5. 缓存 Qt 源码（按 Qt 版本 + 平台作为 key）──────────────────────────
       # 失败重跑或修改配置时可跳过重新下载/解压源码。源码与 CMake 选项无关，
